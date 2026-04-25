@@ -76,7 +76,7 @@
 #include <unistd.h>
 #include <termios.h>
 #include <fcntl.h>
-
+using json = nlohmann::json;
 enum ROBOT_STATE
 {
   INIT,
@@ -84,23 +84,6 @@ enum ROBOT_STATE
   APPROACH,
   GRIPPER
 };
-
-// /*
-// This function send a query command to servo, request its current status.
-// */
-// void ServoDriver::writeQueryCommand()
-// {
-//   std::string command = "";
-//   json ojbect = {
-//       {"T", GripperACommand::READ_ENCODER}
-//   };
-//   command += ojbect.dump();
-
-//   // RCLCPP_INFO(node_->get_logger(), "Write query to actuator: %s", command.c_str());
-
-//   uart_protocol_->sendMsgRaw(command);
-// }
-
 
 int main()
 {
@@ -111,6 +94,7 @@ int main()
   std::string opt_camera_name = "Camera";
   std::string opt_intrinsic_file = "camera.xml";
   std::string opt_eMc_filename = "rc5_ePc.yaml";
+// Initialize gripper
   serialib gripper;
   gripper.openDevice("/dev/ttyACM0", 115200);
 // Initialize camera and display
@@ -121,10 +105,6 @@ int main()
   }
   cv::Mat frame;
   int i = 0;
-  while ((i++ < 20) && !cap.read(frame)) {
-  } // warm up camera by skiping unread frames
-  std::cout << "Image size : " << frame.rows << " " << frame.cols << std::endl;
-
 // Get camera intrinsics
   vpCameraParameters cam;
   vpXmlParserCamera parser;
@@ -158,34 +138,21 @@ int main()
   vpHomogeneousMatrix e_M_c(e_P_c);
   std::cout << "e_M_c:\n" << e_M_c << std::endl;
 // Initialize display and camera parameters
+
   vpImage<unsigned char> I;
-
-  vpImageConvert::convert(frame, I);
   vpDisplayOpenCV *d = nullptr;
-  if (opt_display) {
-    d = new vpDisplayOpenCV(I);
-  }
-  std::shared_ptr<vpDisplay> display = vpDisplayFactory::createDisplay(I, 10, 10, "Current image");
-
-  vpDisplay::display(I);
-  vpDisplay::flush(I);
+  std::shared_ptr<vpDisplay> display = nullptr;
 
   vpRobotDenso6577 robot;
   robot.init(); // param: redefine tool and camera extrinsic parameters for eMC
   robot.set_eMc(e_M_c);
 
   vpDot2 dot;
-  std::cout << "Click on a dot..." << std::endl;
-  dot.initTracking(I);
-  vpImagePoint cog = dot.getCog();
-  vpDisplay::displayCross(I, cog, 10, vpColor::blue);
-  vpDisplay::flush(I);
+  vpImagePoint cog;
 
   vpTRACE("sets the current position of the visual feature ");
   vpFeaturePoint p;
-  vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
 
-  p.set_Z(1);
   vpTRACE("sets the desired position of the visual feature ");
   vpFeaturePoint pd;
   pd.buildFrom(0, 0, 1);
@@ -207,10 +174,6 @@ int main()
   robot.get_eJe(eJe);
   task.set_eJe(eJe);
 
-  vpTRACE("\t we want to see a point on a point..");
-  std::cout << std::endl;
-  task.addFeature(p, pd);
-
   vpTRACE("\t set the gain");
   task.setLambda(0.3);
 
@@ -222,17 +185,163 @@ int main()
   std::cout << "\nHit CTRL-C to stop the loop...\n" << std::flush;
   const uint8_t *converged = (const uint8_t *)"OKE\r";
   int state = INIT;
+  bool gripper_init = false;
+  bool pose_init = false;
+
+  vpColVector initPose(6);  // cấp phát 6 phần tử
+  initPose[0] = 0;
+  initPose[1] = 0;
+  initPose[2] = 90;
+  initPose[3] = 0;
+  initPose[4] = 90;
+  initPose[5] = 0;
+
+  robot.sendPosition(initPose.data);
+
   for (;;) {
     if (state == INIT) {
-      // vpColVector init;
-      // init[0] = 0;
-      // init[1] = 0;
-      // init[2] = 90;
-      // init[3] = 0;
-      // init[4] = 90;
-      // init[5] = 0;
-      // robot.sendPosition(init.data);
-      state = GRIPPER;
+      if (!gripper_init) {
+        json object = {
+          {"T", 101},
+          {"spd", 500},
+          {"acc", 0}
+        };
+
+        // Tạo chuỗi command
+        std::string command = object.dump() + "\r\n";
+
+        // Gửi dữ liệu
+        bool ok = gripper.writeBytes(
+            reinterpret_cast<const uint8_t *>(command.data()),
+            command.size()
+        );
+
+        if (!ok) {
+          std::cerr << "Write failed\n";
+        }
+
+        // ================== SEND SECOND COMMAND ==================
+        object = { {"T", 105} };
+        command = object.dump() + "\r\n";
+
+        ok = gripper.writeBytes(
+            reinterpret_cast<const uint8_t *>(command.data()),
+            command.size()
+        );
+
+        if (!ok) {
+          std::cerr << "Write failed\n";
+        }
+
+        // ================== RECEIVE ==================
+        char buffer[128];
+        int idx = 0;
+
+        bool received_left = false;
+        bool received_right = false;
+
+        char c;
+        int ret;
+
+        timeOut timer;
+        timer.initTimer();
+
+        // Đọc từng byte cho tới khi nhận đủ JSON + '\r'
+        while (true) {
+          ret = gripper.readChar(&c, 10);
+
+          if (ret == 1) {
+              // Debug (có thể bật nếu cần)
+              // std::cout << c;
+
+            if ((c == '{')) {
+              received_left = !received_left;
+            }
+
+            if (c == '}') {
+              received_right = !received_right;
+            }
+            if ((c == '\r') && received_left && received_right) {
+              buffer[idx] = '\0';
+              break;
+            }
+
+            if ((idx < (int)sizeof(buffer) - 1) && received_left) {
+              buffer[idx++] = c;
+            }
+          }
+          if (timer.elapsedTime_ms() > 1000) {
+            std::cout << "TIMEOUT\n";
+            break;
+          }
+        }
+        if (received_left && received_right) {
+          try {
+            nlohmann::json object = nlohmann::json::parse(buffer);
+
+            int T = object.value("T", -1);
+            int load = object.value("load", -1);
+
+            if (T == 1051 && load >= 70) {
+              std::cout << "Gripper init ok" << std::endl;
+              gripper_init = true;
+            }
+          }
+          catch (const nlohmann::json::parse_error &e) {
+              // Debug nếu cần
+              // std::cerr << "Parse error: " << e.what() << std::endl;
+            continue;
+          }
+        }
+      }
+      if (!pose_init) {
+
+        robot.getPosition(vpRobot::ARTICULAR_FRAME, q);
+        q.rad2deg();
+        bool reached =
+          std::abs(q[0] - 0)   < 0.01 &&
+          std::abs(q[1] - 0)   < 0.01 &&
+          std::abs(q[2] - 90)  < 0.01 &&
+          std::abs(q[3] - 0)   < 0.01 &&
+          std::abs(q[4] - 90)  < 0.01 &&
+          std::abs(q[5] - 0)   < 0.01;
+
+        if (reached) {
+          std::cout << "pose init oke" << std::endl;
+
+          while ((i++ < 60) && !cap.read(frame)) {
+          } // warm up camera by skiping unread frames
+          std::cout << "Image size : " << frame.rows << " " << frame.cols << std::endl;
+
+          cap >> frame;
+          vpImageConvert::convert(frame, I);
+
+          // state = JOINT;
+          if ((opt_display) && d == nullptr) {
+            d = new vpDisplayOpenCV(I);
+          }
+          display = vpDisplayFactory::createDisplay(I, 10, 10, "Current image");
+          vpDisplay::display(I);
+          vpDisplay::flush(I);
+
+          dot.initTracking(I);
+          cog = dot.getCog();
+
+          vpDisplay::displayCross(I, cog, 10, vpColor::blue);
+          vpDisplay::flush(I);
+
+          vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
+
+          p.set_Z(1);
+
+          vpTRACE("\t we want to see a point on a point..");
+          std::cout << std::endl;
+          task.addFeature(p, pd);
+          std::cout << "GRIPPER INIT OKE" << std::endl;
+          pose_init = true;
+        }
+      }
+      if (pose_init && gripper_init) state = JOINT;
     }
     else if (state == JOINT) {
       cap >> frame; // get a new frame from camera
@@ -244,7 +353,6 @@ int main()
       // Achieve the tracking of the dot in the image
       dot.track(I);
       cog = dot.getCog();
-
       // Display a green cross at the center of gravity position in the image
       vpDisplay::displayCross(I, cog, 10, vpColor::green);
 
@@ -277,7 +385,7 @@ int main()
         if (i == 5) std::cout << std::endl;
       }
 
-      if (abs(task.getError()[0]) < 1e-3 && abs(task.getError()[1]) < 1e-3) {
+      if (abs(task.getError()[0]) < 5e-3 && abs(task.getError()[1]) < 5e-3) {
         std::cout << "TASK AFTER CONVERGED"<<std::endl;
         task.print();
         robot.uartSend(converged, 4);
@@ -302,6 +410,7 @@ int main()
     else if (state == APPROACH) {
       robot.getPosition(vpRobot::ARTICULAR_FRAME, q);
       q.rad2deg();
+      std::cout << q.t() << std::endl;
       if (q.data[0] == -1 && q.data[1] == -1 && q.data[2] == -1 && q.data[3] == -1 && q.data[4] == -1 && q.data[5] == -1) {
         std::cout << "CLOSED GRIPPER"<< std::endl;
         state = GRIPPER;
@@ -311,7 +420,7 @@ int main()
       nlohmann::json object = {
           {"T", 102},
           {"spd", 500},
-          {"acc", 0}
+          {"acc", 20}
       };
 
       // Tạo chuỗi command trực tiếp
@@ -327,12 +436,77 @@ int main()
       if (!ok) {
         std::cerr << "Write failed\n";
       }
+      object = { {"T", 105} };
+      command = object.dump();
+      command += "\r\n";
+      ok = gripper.writeBytes(
+          reinterpret_cast<const uint8_t *>(command.data()),
+          command.size()
+      );
+      if (!ok) {
+        std::cerr << "Write failed\n";
+      }
+      char buffer[128];
+      int idx = 0;
 
+      bool received_left = false;
+      bool received_right = false;
 
-      std::cout << "CLOSE DONE:" << std::endl;
+      char c;
+      int ret;
+
+      timeOut timer;
+      timer.initTimer();
+
+      // 1. Đọc từng byte cho tới '\r'
+      while (true) {
+        ret = gripper.readChar(&c, 10);
+
+        if (ret == 1) {
+            // Debug (có thể bật nếu cần)
+            // std::cout << c;
+
+          if ((c == '{')) {
+            received_left = !received_left;
+          }
+
+          if (c == '}') {
+            received_right = !received_right;
+          }
+          if ((c == '\r') && received_left && received_right) {
+            buffer[idx] = '\0';
+            break;
+          }
+
+          if ((idx < (int)sizeof(buffer) - 1) && received_left) {
+            buffer[idx++] = c;
+          }
+        }
+        if (timer.elapsedTime_ms() > 1000) {
+          std::cout << "TIMEOUT\n";
+          break;
+        }
+      }
+      if (received_left && received_right) {
+        try {
+          nlohmann::json object = nlohmann::json::parse(buffer);
+
+          int T = object.value("T", -1);
+          int load = object.value("load", -1);
+
+          if (T == 1051 && load <= -150) {
+            std::cout << "Grabbed" << std::endl;
+          }
+        }
+        catch (const nlohmann::json::parse_error &e) {
+            // Debug nếu cần
+            // std::cerr << "Parse error: " << e.what() << std::endl;
+          continue;
+        }
+      }
     }
-    // std::cout << "Display task information: " << std::endl;
-    // task.print();
+      // std::cout << "Display task information: " << std::endl;
+      // task.print();
   }
   return EXIT_SUCCESS;
 }
