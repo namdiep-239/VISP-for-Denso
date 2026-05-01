@@ -95,6 +95,12 @@ enum ROBOT_STATE
   GRIPPER,     // Đóng gripper
   CLASSIFIED   // Hoàn thành chu trình
 };
+enum GripperState
+{
+  CLOSED,
+  OPENED,
+  INIT_GRIPPER
+};
 // =============================================================
 // Gửi lệnh xuống gripper qua UART
 // =============================================================
@@ -255,6 +261,7 @@ int main()
   std::string opt_camera_name = "Camera";
   std::string opt_intrinsic_file = "camera.xml";
   std::string opt_eMc_filename = "rc5_ePc.yaml";
+  GripperState gripperStatus = INIT_GRIPPER;
   // ========================
   // Khởi tạo gripper (UART)
   // ========================
@@ -366,7 +373,7 @@ int main()
   task.set_eJe(eJe);
 
   vpTRACE("\t set the gain");
-  task.setLambda(0.3);
+  task.setLambda(0.4);
 
   vpTRACE("Display task information ");
   task.print();
@@ -383,7 +390,6 @@ int main()
   bool gripper_init = false;
   bool pose_init = false;
   for (;;) {
-
     cap >> frame;
     vpImageConvert::convert(frame, I);
     vpDisplay::display(I);
@@ -402,6 +408,9 @@ int main()
     else if (state == INIT) {
       if (!gripper_init) {
         gripper_init = gripperOpen(gripper);
+        if (gripper_init) {
+          gripperStatus = OPENED;
+        }
       }
       if (!pose_init) {
         robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
@@ -420,9 +429,21 @@ int main()
 
         if (reached) {
           std::cout << "pose init oke" << std::endl;
+          while ((i++ < 60) && !cap.read(frame)) {
+          }
+          vpImageConvert::convert(frame, I);
+          vpDisplay::display(I);
           dot.initTracking(I);
           cog = dot.getCog();
-
+          std::cout << "Blob characteristics: " << std::endl;
+          std::cout << " width : " << blob.getWidth() << std::endl;
+          std::cout << " height: " << blob.getHeight() << std::endl;
+          std::cout << " area: " << blob.getArea() << std::endl;
+          std::cout << " gray level min: " << blob.getGrayLevelMin() << std::endl;
+          std::cout << " gray level max: " << blob.getGrayLevelMax() << std::endl;
+          std::cout << " grayLevelPrecision: " << blob.getGrayLevelPrecision() << std::endl;
+          std::cout << " sizePrecision: " << blob.getSizePrecision() << std::endl;
+          std::cout << " ellipsoidShapePrecision: " << blob.getEllipsoidShapePrecision() << std::endl;
           vpDisplay::displayCross(I, cog, 10, vpColor::blue);
           vpDisplay::flush(I);
 
@@ -445,7 +466,6 @@ int main()
     }
     else if (state == JOINT) {
       robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-
       bool reached =
         std::abs(q_cur[0] - q_new[0])   < 0.01 &&
         std::abs(q_cur[1] - q_new[1])   < 0.01 &&
@@ -455,6 +475,7 @@ int main()
         std::abs(q_cur[5] - q_new[5])   < 0.01;
 
       if (reached) {
+        std::cout << "BUG JOINT" << std::endl;
         dot.track(I);
         cog = dot.getCog();
         // Display a green cross at the center of gravity position in the image
@@ -468,7 +489,7 @@ int main()
 
         vpColVector v;
         vpColVector vel_max(6);
-        double delta_t = 0.2; // 10 ms
+        double delta_t = 0.5; // 10 ms
         v = task.computeControlLaw();
 
         vpServoDisplay::display(task, cam, I);
@@ -511,14 +532,28 @@ int main()
       }
     }
     else if (state == GRIPPER) {
-      if (gripperClose(gripper)) {
-        state = CLASSIFIED;
+      if (gripperStatus == OPENED) {
+        if (gripperClose(gripper)) {
+          gripperStatus = CLOSED;
+          state = CLASSIFIED;
+        }
+      }
+      else if (gripperStatus == CLOSED) {
+        if (gripperOpen(gripper)) {
+          gripperStatus = OPENED;
+          state = PREINIT;
+        }
       }
     }
     else if (state == CLASSIFIED) {
+      vpTime::wait(1000);
       std::cout << "PRINT HEHE DO CLASSIFIED" << std::endl;
+      // SEND oke to RC5 controller
+      //
+      // robot.uartSend(converged, 4);
       state = PREINIT;
     }
+    vpDisplay::flush(I);
   }
   return EXIT_SUCCESS;
 }
