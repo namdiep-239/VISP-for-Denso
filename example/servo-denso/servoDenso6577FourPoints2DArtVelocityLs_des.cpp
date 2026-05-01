@@ -345,6 +345,19 @@ int main()
   // ========================
   // Visual feature
   // ========================
+  vpDot2 blob;
+  std::list<vpDot2> blob_list;
+  blob.setWidth(50);
+  blob.setHeight(50);
+#if VISP_VERSION_INT > VP_VERSION_INT(2, 7, 0)
+  blob.setArea(1700);
+#endif
+  blob.setGrayLevelMin(0);
+  blob.setGrayLevelMax(30);
+  blob.setGrayLevelPrecision(0.8);
+  blob.setSizePrecision(0.65);
+  blob.setEllipsoidShapePrecision(0.65);
+
   vpDot2 dot;
   vpImagePoint cog;
 
@@ -365,7 +378,6 @@ int main()
 
   vpVelocityTwistMatrix cVe;
   robot.get_cVe(cVe);
-  std::cout << cVe << std::endl;
   task.set_cVe(cVe);
   vpTRACE("Set the Jacobian (expressed in the end-effector frame)");
   vpMatrix eJe;
@@ -384,11 +396,11 @@ int main()
   // Biến điều khiển
   // ========================
   vpColVector q_cur(6), q_new(6);
-  std::cout << "\nHit CTRL-C to stop the loop...\n" << std::flush;
   const uint8_t *converged = (const uint8_t *)"OKE\r";
   int state = PREINIT;
   bool gripper_init = false;
   bool pose_init = false;
+
   for (;;) {
     cap >> frame;
     vpImageConvert::convert(frame, I);
@@ -429,12 +441,17 @@ int main()
 
         if (reached) {
           std::cout << "pose init oke" << std::endl;
-          while ((i++ < 60) && !cap.read(frame)) {
-          }
           vpImageConvert::convert(frame, I);
           vpDisplay::display(I);
-          dot.initTracking(I);
+
+          if (blob_list.size() == 0) blob.searchDotsInArea(I, 0, 0, I.getWidth(), I.getHeight(), blob_list);
+          std::cout << "Number of auto detected blob: " << blob_list.size() << std::endl;
+          std::cout << "A click to exit..." << std::endl;
+
+          dot = *(blob_list.begin());
           cog = dot.getCog();
+          blob_list.pop_front();
+
           std::cout << "Blob characteristics: " << std::endl;
           std::cout << " width : " << blob.getWidth() << std::endl;
           std::cout << " height: " << blob.getHeight() << std::endl;
