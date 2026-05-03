@@ -93,7 +93,8 @@ enum ROBOT_STATE
   JOINT,       // Visual servoing
   APPROACH,    // Chờ tín hiệu tiếp cận
   GRIPPER,     // Đóng gripper
-  CLASSIFIED   // Hoàn thành chu trình
+  CLASSIFIED,   // Hoàn thành chu trình
+  NEXT_STEP
 };
 enum GripperState
 {
@@ -347,16 +348,6 @@ int main()
   // ========================
   vpDot2 blob;
   std::list<vpDot2> blob_list;
-  blob.setWidth(50);
-  blob.setHeight(50);
-#if VISP_VERSION_INT > VP_VERSION_INT(2, 7, 0)
-  blob.setArea(1700);
-#endif
-  blob.setGrayLevelMin(0);
-  blob.setGrayLevelMax(30);
-  blob.setGrayLevelPrecision(0.8);
-  blob.setSizePrecision(0.65);
-  blob.setEllipsoidShapePrecision(0.65);
 
   vpDot2 dot;
   vpImagePoint cog;
@@ -443,8 +434,25 @@ int main()
           std::cout << "pose init oke" << std::endl;
           vpImageConvert::convert(frame, I);
           vpDisplay::display(I);
-
-          if (blob_list.size() == 0) blob.searchDotsInArea(I, 0, 0, I.getWidth(), I.getHeight(), blob_list);
+          if (blob_list.size() == 0) {
+  // Learn the characteristics of the blob to auto detect
+            blob.setGraphics(true);
+            blob.setGraphicsThickness(1);
+            blob.initTracking(I);
+            blob.track(I);
+            std::cout << "Blob characteristics: " << std::endl;
+            std::cout << " width : " << blob.getWidth() << std::endl;
+            std::cout << " height: " << blob.getHeight() << std::endl;
+#if VISP_VERSION_INT > VP_VERSION_INT(2, 7, 0)
+            std::cout << " area: " << blob.getArea() << std::endl;
+#endif
+            std::cout << " gray level min: " << blob.getGrayLevelMin() << std::endl;
+            std::cout << " gray level max: " << blob.getGrayLevelMax() << std::endl;
+            std::cout << " grayLevelPrecision: " << blob.getGrayLevelPrecision() << std::endl;
+            std::cout << " sizePrecision: " << blob.getSizePrecision() << std::endl;
+            std::cout << " ellipsoidShapePrecision: " << blob.getEllipsoidShapePrecision() << std::endl;
+            blob.searchDotsInArea(I, 0, 0, I.getWidth(), I.getHeight(), blob_list);
+          }
           std::cout << "Number of auto detected blob: " << blob_list.size() << std::endl;
           std::cout << "A click to exit..." << std::endl;
 
@@ -549,18 +557,10 @@ int main()
       }
     }
     else if (state == GRIPPER) {
-      if (gripperStatus == OPENED) {
-        if (gripperClose(gripper)) {
-          gripperStatus = CLOSED;
-          state = CLASSIFIED;
-        }
+      if (gripperClose(gripper)) {
+        state = CLASSIFIED;
       }
-      else if (gripperStatus == CLOSED) {
-        if (gripperOpen(gripper)) {
-          gripperStatus = OPENED;
-          state = PREINIT;
-        }
-      }
+
     }
     else if (state == CLASSIFIED) {
       vpTime::wait(1000);
@@ -568,7 +568,51 @@ int main()
       // SEND oke to RC5 controller
       //
       // robot.uartSend(converged, 4);
-      state = PREINIT;
+      q_new[0] = 0;
+      q_new[1] = 0;
+      q_new[2] = 90;
+      q_new[3] = 0;
+      q_new[4] = 90;
+      q_new[5] = 0;
+
+      robot.sendPosition(q_new.data);
+
+      robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+      q_cur.rad2deg();
+      bool reached =
+        std::abs(q_cur[0] - q_new[0])   < 0.01 &&
+        std::abs(q_cur[1] - q_new[1])   < 0.01 &&
+        std::abs(q_cur[2] - q_new[2])  < 0.01 &&
+        std::abs(q_cur[3] - q_new[3])   < 0.01 &&
+        std::abs(q_cur[4] - q_new[4])  < 0.01 &&
+        std::abs(q_cur[5] - q_new[5])   < 0.01;
+      if (reached) {
+        state = NEXT_STEP;
+      }
+    }
+    else if (state == NEXT_STEP) {
+      q_new[0] = 0;
+      q_new[1] = 0;
+      q_new[2] = 90;
+      q_new[3] = 0;
+      q_new[4] = 90;
+      q_new[5] = 0;
+
+      robot.sendPosition(q_new.data);
+      q_cur.rad2deg();
+      robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+      bool reached =
+        std::abs(q_cur[0] - q_new[0])   < 0.01 &&
+        std::abs(q_cur[1] - q_new[1])   < 0.01 &&
+        std::abs(q_cur[2] - q_new[2])  < 0.01 &&
+        std::abs(q_cur[3] - q_new[3])   < 0.01 &&
+        std::abs(q_cur[4] - q_new[4])  < 0.01 &&
+        std::abs(q_cur[5] - q_new[5])   < 0.01;
+      if (reached) {
+        if (gripperOpen(gripper)) {
+          state = PREINIT;
+        }
+      }
     }
     vpDisplay::flush(I);
   }
