@@ -169,23 +169,24 @@ def main():
         if cpu_path is None:
             print(f"FAILURE cpu_model_not_found:{cpu_path_str}", flush=True)
             sys.exit(1)
-        try:
-            from tflite_runtime.interpreter import Interpreter
-            interpreter = Interpreter(model_path=str(cpu_path))
-            interpreter.allocate_tensors()
-            print(f"[CPU] Loaded via tflite_runtime: {cpu_path.name}", file=sys.stderr)
-        except ImportError:
-            pass
 
-    if not USE_CORAL and interpreter is None:
-        cpu_path = resolve_model_path(cpu_path_str)
-        try:
-            import tensorflow as tf
-            interpreter = tf.lite.Interpreter(model_path=str(cpu_path))
-            interpreter.allocate_tensors()
-            print(f"[CPU] Loaded via tensorflow: {cpu_path.name}", file=sys.stderr)
-        except ImportError:
-            pass
+        # Try each CPU backend in order; stop at the first that works.
+        # ai_edge_litert: Google's current package (replaces tflite_runtime, supports Py 3.10+)
+        # tflite_runtime: legacy package (Python 3.9 / gesture_env)
+        # tensorflow:     heavy fallback, same Interpreter API
+        for _load in [
+            lambda: __import__("ai_edge_litert.interpreter", fromlist=["Interpreter"]).Interpreter,
+            lambda: __import__("tflite_runtime.interpreter", fromlist=["Interpreter"]).Interpreter,
+            lambda: __import__("tensorflow", fromlist=[""]).lite.Interpreter,
+        ]:
+            try:
+                InterpreterCls = _load()
+                interpreter = InterpreterCls(model_path=str(cpu_path))
+                interpreter.allocate_tensors()
+                print(f"[CPU] Loaded {cpu_path.name}", file=sys.stderr)
+                break
+            except (ImportError, AttributeError):
+                continue
 
     if interpreter is None:
         print("FAILURE no_tflite_backend_available", flush=True)
