@@ -69,6 +69,8 @@
 #include <visp3/vs/vpServoDisplay.h>
 #include <visp3/core/vpXmlParserCamera.h>
 #include <opencv2/videoio.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 #include <visp3/core/vpImageConvert.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -244,6 +246,90 @@ bool gripperClose(serialib *gripper)
   }
   return false;
 }
+// Run Python AI detection on the current frame.
+// Saves frame to /tmp/visp_ai_frame.jpg, then spawns detect_cube.py as a subprocess.
+// Returns true on success and sets detected_center to vpImagePoint(v, u).
+// Falls back gracefully: caller should call dot.initTracking(I) if this returns false.
+bool detectCubeWithAI(const vpImage<unsigned char> &I,
+                      vpImagePoint &detected_center,
+                      const std::string &config_path = "ai_module/config.json")
+{
+  // Convert grayscale vpImage to BGR cv::Mat — model expects 3-channel input
+  cv::Mat gray_mat, bgr_mat;
+  vpImageConvert::convert(I, gray_mat);
+  cv::cvtColor(gray_mat, bgr_mat, cv::COLOR_GRAY2BGR);
+  if (!cv::imwrite("/tmp/visp_ai_frame.jpg", bgr_mat)) {
+    std::cerr << "[AI] Failed to save frame to /tmp/visp_ai_frame.jpg" << std::endl;
+    return false;
+  }
+
+  // Read python_bin from config.json (nlohmann::json already available via vpJSON.h)
+  std::string python_bin;
+  try {
+    std::ifstream cfg_file(config_path);
+    if (!cfg_file.is_open()) {
+      std::cerr << "[AI] Cannot open config: " << config_path << std::endl;
+      return false;
+    }
+    nlohmann::json cfg = nlohmann::json::parse(cfg_file);
+    python_bin = cfg.value("python_bin", "/usr/bin/python3");
+  } catch (const std::exception &e) {
+    std::cerr << "[AI] Config parse error: " << e.what() << std::endl;
+    return false;
+  }
+
+  // Resolve detect_cube.py path from the same directory as config.json
+  std::string script_dir;
+  auto slash_pos = config_path.rfind('/');
+  if (slash_pos != std::string::npos)
+    script_dir = config_path.substr(0, slash_pos);
+  else
+    script_dir = ".";
+  std::string cmd = python_bin + " " + script_dir + "/detect_cube.py /tmp/visp_ai_frame.jpg";
+
+  FILE *pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    std::cerr << "[AI] popen failed: " << cmd << std::endl;
+    return false;
+  }
+
+  // 3-second timeout via POSIX select()
+  int fd = fileno(pipe);
+  fd_set rfds;
+  struct timeval tv;
+  FD_ZERO(&rfds);
+  FD_SET(fd, &rfds);
+  tv.tv_sec  = 3;
+  tv.tv_usec = 0;
+  if (select(fd + 1, &rfds, nullptr, nullptr, &tv) <= 0) {
+    std::cerr << "[AI] Subprocess timeout (3 s)" << std::endl;
+    pclose(pipe);
+    return false;
+  }
+
+  char line[512] = {};
+  if (fgets(line, sizeof(line), pipe) == nullptr) {
+    pclose(pipe);
+    return false;
+  }
+  pclose(pipe);
+
+  std::string result(line);
+  if (result.rfind("SUCCESS", 0) == 0) {
+    double u = 0, v = 0, conf = 0, x = 0, y = 0, w = 0, h = 0;
+    if (std::sscanf(line, "SUCCESS %lf %lf %lf %lf %lf %lf %lf",
+                    &u, &v, &conf, &x, &y, &w, &h) == 7) {
+      detected_center = vpImagePoint(v, u);
+      return true;
+    }
+    std::cerr << "[AI] Malformed SUCCESS line: " << result;
+    return false;
+  }
+  if (result.rfind("FAILURE", 0) == 0)
+    std::cerr << "[AI] " << result;
+  return false;
+}
+
 int main()
 {
   // ========================
@@ -420,7 +506,14 @@ int main()
 
         if (reached) {
           std::cout << "pose init oke" << std::endl;
-          dot.initTracking(I);
+          vpImagePoint ai_hint;
+          if (detectCubeWithAI(I, ai_hint)) {
+            std::cout << "[AI] Cube detected at: " << ai_hint << std::endl;
+            dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
+          } else {
+            std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+            dot.initTracking(I);           // original manual-click fallback
+          }
           cog = dot.getCog();
 
           vpDisplay::displayCross(I, cog, 10, vpColor::blue);
