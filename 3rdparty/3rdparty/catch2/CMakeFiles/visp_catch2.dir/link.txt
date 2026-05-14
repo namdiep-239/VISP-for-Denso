@@ -1,0 +1,2 @@
+/usr/bin/ar qc ../lib/libvisp_catch2.a CMakeFiles/visp_catch2.dir/catch_amalgamated.cpp.o
+/usr/bin/ranlib ../lib/libvisp_catch2.a

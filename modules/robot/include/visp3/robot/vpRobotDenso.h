@@ -164,6 +164,7 @@ public: /* Methode publiques */
   bool readUARTJoint(double *q, int timeout_ms = 200, int func = 0);
   bool getJointPosition(double *q, int func = 0);
   bool sendPosition(double *q);
+  void flush();
 
 private:
   double maxRotationVelocity_joint6;

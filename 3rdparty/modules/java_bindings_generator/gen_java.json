@@ -1,0 +1,13 @@
+{
+  "rootdir": "/home/nguyen/visp-ws/visp",
+  "modules": [
+    { "name": "core", "location": "modules/core" },
+    { "name": "imgproc", "location": "modules/imgproc" },
+    { "name": "io", "location": "modules/io" },
+    { "name": "detection", "location": "modules/detection" },
+    { "name": "mbt", "location": "modules/tracker/mbt" }
+  ],
+  "files_remap": [
+    { "src": "modules/java/generator/android/java/org/visp/android/ViSPLoader.java.in", "target": "/home/nguyen/visp-ws/visp/3rdparty/configured/modules/java/generator/android/java/org/visp/android/ViSPLoader.java" }
+  ]
+}

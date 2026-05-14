@@ -7,7 +7,7 @@
 #include <visp3/core/vpIoTools.h>
 #include <visp3/gui/vpDisplayFactory.h>
 #include <visp3/io/vpImageIo.h>
-
+#include <visp3/io/vpVideoReader.h>
 #if defined(VISP_HAVE_MODULE_IMGPROC)
 //! [Include]
 #include <visp3/imgproc/vpImgproc.h>
@@ -60,8 +60,9 @@ int main(int argc, const char **argv)
   (defined(VISP_HAVE_PNG) || defined(VISP_HAVE_OPENCV) || defined(VISP_HAVE_STBIMAGE) || defined(VISP_HAVE_SIMDLIB))
   //! [Macro defined]
 
-  std::string input_filename = "Sample_low_brightness.png";
-  double alpha = 10.0, beta = 50.0;
+  std::string input_filename = "./ur_image-%d.png";
+  double alpha = 10.0;
+  double beta[5] = { -75, -35, 0 , 35, 75 };
   double gamma = 3.5;
   VISP_NAMESPACE_NAME::vpGammaMethod method = VISP_NAMESPACE_NAME::GAMMA_MANUAL;
   VISP_NAMESPACE_NAME::vpGammaColorHandling colorHandling = VISP_NAMESPACE_NAME::GAMMA_HSV;
@@ -77,10 +78,6 @@ int main(int argc, const char **argv)
     else if (std::string(argv[i]) == "--alpha" && i + 1 < argc) {
       ++i;
       alpha = atof(argv[i]);
-    }
-    else if (std::string(argv[i]) == "--beta" && i + 1 < argc) {
-      ++i;
-      beta = atof(argv[i]);
     }
     else if (std::string(argv[i]) == "--gamma" && i + 1 < argc) {
       ++i;
@@ -136,125 +133,132 @@ int main(int argc, const char **argv)
   }
 
   // Filename without extension to save the results
-  const std::string input_name = vpIoTools::getNameWE(input_filename);
-
   vpImage<vpRGBa> I_color;
-  vpImageIo::read(I_color, input_filename);
-  vpImage<unsigned char> I_gray;
-  vpImageConvert::convert(I_color, I_gray);
-  vpImage<vpRGBa> I_gray_display;
-  vpImageConvert::convert(I_gray, I_gray_display);
+  vpVideoReader reader;
+  reader.setFileName(input_filename);
+  reader.open(I_color);
+  do {
+    reader.acquire(I_color);
+    input_filename = reader.getFrameName();
+    const std::string input_name = vpIoTools::getNameWE(input_filename);
+  // vpImageIo::read(I_color, input_filename);
+    vpImage<unsigned char> I_gray;
+    vpImageConvert::convert(I_color, I_gray);
+    vpImage<vpRGBa> I_gray_display;
+    vpImageConvert::convert(I_gray, I_gray_display);
 
-  // Side-by-side images
-  vpImage<vpRGBa> I_color_res(I_color.getHeight(), 2 * I_color.getWidth());
-  I_color_res.insert(I_color, vpImagePoint());
-  vpImage<unsigned char> I_gray_res(I_gray.getHeight(), 2 * I_gray.getWidth());
-  I_gray_res.insert(I_gray, vpImagePoint());
+    // Side-by-side images
+    vpImage<vpRGBa> I_color_res(I_color.getHeight(), 2 * I_color.getWidth());
+    I_color_res.insert(I_color, vpImagePoint());
+    vpImage<unsigned char> I_gray_res(I_gray.getHeight(), 2 * I_gray.getWidth());
+    I_gray_res.insert(I_gray, vpImagePoint());
 
-  // Side-by-side display for color (top) and gray (bottom) images
-  vpImage<vpRGBa> I_display(2 * I_color.getHeight(), 2 * I_color.getWidth());
-  I_display.insert(I_color, vpImagePoint());
-  I_display.insert(I_gray_display, vpImagePoint(I_color.getHeight(), 0));
-  std::shared_ptr<vpDisplay> d = vpDisplayFactory::createDisplay();
-  d->setDownScalingFactor(static_cast<vpDisplay::vpScaleType>(scale_display));
-  d->init(I_display, 10, 10, "Brightness adjustment results");
+    // Side-by-side display for color (top) and gray (bottom) images
+    vpImage<vpRGBa> I_display(2 * I_color.getHeight(), 2 * I_color.getWidth());
+    I_display.insert(I_color, vpImagePoint());
+    I_display.insert(I_gray_display, vpImagePoint(I_color.getHeight(), 0));
+    std::shared_ptr<vpDisplay> d = vpDisplayFactory::createDisplay();
+    d->setDownScalingFactor(static_cast<vpDisplay::vpScaleType>(scale_display));
+    d->init(I_display, 10, 10, "Brightness adjustment results");
+    for (int i = 0; i < 5; i++) {
+      //! [Brightness contrast adjustment]
+      vpImage<vpRGBa> I_color_adjust;
+      VISP_NAMESPACE_NAME::adjust(I_color, I_color_adjust, alpha, beta[i]);
+      vpImage<unsigned char> I_gray_adjust;
+      VISP_NAMESPACE_NAME::adjust(I_gray, I_gray_adjust, alpha, beta[i]);
+      //! [Brightness contrast adjustment]
 
-  //! [Brightness contrast adjustment]
-  vpImage<vpRGBa> I_color_adjust;
-  VISP_NAMESPACE_NAME::adjust(I_color, I_color_adjust, alpha, beta);
-  vpImage<unsigned char> I_gray_adjust;
-  VISP_NAMESPACE_NAME::adjust(I_gray, I_gray_adjust, alpha, beta);
-  //! [Brightness contrast adjustment]
-
-  std::stringstream ss_color;
-  ss_color << input_name << "_adjust_alpha=" << alpha << "_beta=" << beta << ".png";
-  std::stringstream ss_gray;
-  ss_gray << input_name << "_adjust_alpha=" << alpha << "_beta=" << beta << "_gray.png";
-  display(I_display, I_color_res, I_color_adjust, I_gray_res, I_gray_adjust, I_gray_display,
-          "Brightness and contrast adjustment. Click to continue.", ss_color.str(), ss_gray.str());
-
-  //! [Gamma correction]
-  if (method != VISP_NAMESPACE_NAME::GAMMA_MANUAL) {
-    // If the user wants to use an automatic method, the gamma factor must be negative.
-    gamma = -1.;
-  }
-
-  if (gamma > 0.) {
-    // If the user wants to set a constant user-defined gamma factor, the method must be set to manual.
-    method = VISP_NAMESPACE_NAME::GAMMA_MANUAL;
-  }
-  vpImage<vpRGBa> I_color_gamma_correction;
-  VISP_NAMESPACE_NAME::gammaCorrection(I_color, I_color_gamma_correction, static_cast<float>(gamma), colorHandling, method);
-  vpImage<unsigned char> I_gray_gamma_correction;
-  VISP_NAMESPACE_NAME::gammaCorrection(I_gray, I_gray_gamma_correction, static_cast<float>(gamma), method);
-  //! [Gamma correction]
-
-  ss_color.str("");
-  ss_color << input_name << "_gamma=" << gamma << ".png";
-  ss_gray.str("");
-  ss_gray << input_name << "_gamma=" << gamma << "_gray.png";
-  display(I_display, I_color_res, I_color_gamma_correction, I_gray_res, I_gray_gamma_correction, I_gray_display,
-    "Gamma correction. Click to continue.", ss_color.str(), ss_gray.str());
-
-  // Display results for the different Gamma correction method
-  for (int gamma_idx = 0; gamma_idx < VISP_NAMESPACE_NAME::GAMMA_METHOD_COUNT; ++gamma_idx) {
-    gamma = -1.;
-    VISP_NAMESPACE_NAME::vpGammaMethod gamma_method = static_cast<VISP_NAMESPACE_NAME::vpGammaMethod>(gamma_idx);
-    if (gamma_method == VISP_NAMESPACE_NAME::GAMMA_MANUAL) {
-      continue;
+      std::stringstream ss_color;
+      ss_color << input_name << "_adjust_alpha=" << alpha << "_beta=" << beta[i] << ".png";
+      std::stringstream ss_gray;
+      ss_gray << input_name << "_adjust_alpha=" << alpha << "_beta=" << beta[i] << "_gray.png";
+      display(I_display, I_color_res, I_color_adjust, I_gray_res, I_gray_adjust, I_gray_display,
+              "Brightness and contrast adjustment. Click to continue.", ss_color.str(), ss_gray.str());
     }
 
-    vpImage<vpRGBa> I_color_gamma_correction;
-    VISP_NAMESPACE_NAME::gammaCorrection(I_color, I_color_gamma_correction, static_cast<float>(gamma), colorHandling,
-      gamma_method);
-    vpImage<unsigned char> I_gray_gamma_correction;
-    VISP_NAMESPACE_NAME::gammaCorrection(I_gray, I_gray_gamma_correction, static_cast<float>(gamma), gamma_method);
+    // //! [Gamma correction]
+    // if (method != VISP_NAMESPACE_NAME::GAMMA_MANUAL) {
+    //   // If the user wants to use an automatic method, the gamma factor must be negative.
+    //   gamma = -1.;
+    // }
 
-    const std::string gamma_name = VISP_NAMESPACE_NAME::vpGammaMethodToString(gamma_method);
-    ss_color.str("");
-    ss_color << input_name << "_" << gamma_name << ".png";
-    ss_gray.str("");
-    ss_gray << input_name << "_" << gamma_name << "_gray.png";
-    display(I_display, I_color_res, I_color_gamma_correction, I_gray_res, I_gray_gamma_correction, I_gray_display,
-      "Gamma correction. Click to continue.", ss_color.str(), ss_gray.str(), gamma_name);
-  }
+    // if (gamma > 0.) {
+    //   // If the user wants to set a constant user-defined gamma factor, the method must be set to manual.
+    //   method = VISP_NAMESPACE_NAME::GAMMA_MANUAL;
+    // }
+    // vpImage<vpRGBa> I_color_gamma_correction;
+    // VISP_NAMESPACE_NAME::gammaCorrection(I_color, I_color_gamma_correction, static_cast<float>(gamma), colorHandling, method);
+    // vpImage<unsigned char> I_gray_gamma_correction;
+    // VISP_NAMESPACE_NAME::gammaCorrection(I_gray, I_gray_gamma_correction, static_cast<float>(gamma), method);
+    // //! [Gamma correction]
 
-  //! [Histogram equalization]
-  vpImage<vpRGBa> I_color_equalize_histogram;
-  VISP_NAMESPACE_NAME::equalizeHistogram(I_color, I_color_equalize_histogram);
-  vpImage<unsigned char> I_gray_equalize_histogram;
-  VISP_NAMESPACE_NAME::equalizeHistogram(I_gray, I_gray_equalize_histogram);
-  //! [Histogram equalization]
+    // ss_color.str("");
+    // ss_color << input_name << "_gamma=" << gamma << ".png";
+    // ss_gray.str("");
+    // ss_gray << input_name << "_gamma=" << gamma << "_gray.png";
+    // display(I_display, I_color_res, I_color_gamma_correction, I_gray_res, I_gray_gamma_correction, I_gray_display,
+    //   "Gamma correction. Click to continue.", ss_color.str(), ss_gray.str());
 
-  ss_color.str("");
-  ss_color << input_name << "_eqHist.png";
-  ss_gray.str("");
-  ss_gray << input_name << "_eqHist_gray.png";
-  display(I_display, I_color_res, I_color_equalize_histogram, I_gray_res, I_gray_equalize_histogram, I_gray_display,
-    "Histogram equalization. Click to continue.", ss_color.str(), ss_gray.str());
+    // // Display results for the different Gamma correction method
+    // for (int gamma_idx = 0; gamma_idx < VISP_NAMESPACE_NAME::GAMMA_METHOD_COUNT; ++gamma_idx) {
+    //   gamma = -1.;
+    //   VISP_NAMESPACE_NAME::vpGammaMethod gamma_method = static_cast<VISP_NAMESPACE_NAME::vpGammaMethod>(gamma_idx);
+    //   if (gamma_method == VISP_NAMESPACE_NAME::GAMMA_MANUAL) {
+    //     continue;
+    //   }
 
-  //! [Retinex]
-  vpImage<vpRGBa> I_color_retinex;
-  VISP_NAMESPACE_NAME::retinex(I_color, I_color_retinex, scale, scaleDiv, level, dynamic, kernelSize);
-  // Retinex uses color image as input
-  // Convert gray image into RGBa format for quick test
-  vpImage<vpRGBa> I_gray_color;
-  vpImageConvert::convert(I_gray, I_gray_color);
-  vpImage<vpRGBa> I_gray_color_retinex;
-  VISP_NAMESPACE_NAME::retinex(I_gray_color, I_gray_color_retinex, scale, scaleDiv, level, dynamic, kernelSize);
-  // Convert back to gray
-  vpImage<unsigned char> I_gray_retinex;
-  vpImageConvert::convert(I_gray_color_retinex, I_gray_retinex);
-  //! [Retinex]
+    //   vpImage<vpRGBa> I_color_gamma_correction;
+    //   VISP_NAMESPACE_NAME::gammaCorrection(I_color, I_color_gamma_correction, static_cast<float>(gamma), colorHandling,
+    //     gamma_method);
+    //   vpImage<unsigned char> I_gray_gamma_correction;
+    //   VISP_NAMESPACE_NAME::gammaCorrection(I_gray, I_gray_gamma_correction, static_cast<float>(gamma), gamma_method);
 
-  ss_color.str("");
-  ss_color << input_name << "_Retinex_scale=" << scale << "_scaleDiv=" << scaleDiv << "_level=" << level
-    << "_dynamic=" << dynamic << "_kernelSize=" << kernelSize << ".png";
-  ss_gray.str("");
-  ss_gray << input_name << "_Retinex_scale=" << scale << "_scaleDiv=" << scaleDiv << "_level=" << level
-    << "_dynamic=" << dynamic << "_kernelSize=" << kernelSize << "_gray.png";
-  display(I_display, I_color_res, I_color_retinex, I_gray_res, I_gray_retinex, I_gray_display,
-    "Retinex. Click to quit.", ss_color.str(), ss_gray.str());
+    //   const std::string gamma_name = VISP_NAMESPACE_NAME::vpGammaMethodToString(gamma_method);
+    //   ss_color.str("");
+    //   ss_color << input_name << "_" << gamma_name << ".png";
+    //   ss_gray.str("");
+    //   ss_gray << input_name << "_" << gamma_name << "_gray.png";
+    //   display(I_display, I_color_res, I_color_gamma_correction, I_gray_res, I_gray_gamma_correction, I_gray_display,
+    //     "Gamma correction. Click to continue.", ss_color.str(), ss_gray.str(), gamma_name);
+    // }
+
+    // //! [Histogram equalization]
+    // vpImage<vpRGBa> I_color_equalize_histogram;
+    // VISP_NAMESPACE_NAME::equalizeHistogram(I_color, I_color_equalize_histogram);
+    // vpImage<unsigned char> I_gray_equalize_histogram;
+    // VISP_NAMESPACE_NAME::equalizeHistogram(I_gray, I_gray_equalize_histogram);
+    // //! [Histogram equalization]
+
+    // ss_color.str("");
+    // ss_color << input_name << "_eqHist.png";
+    // ss_gray.str("");
+    // ss_gray << input_name << "_eqHist_gray.png";
+    // display(I_display, I_color_res, I_color_equalize_histogram, I_gray_res, I_gray_equalize_histogram, I_gray_display,
+    //   "Histogram equalization. Click to continue.", ss_color.str(), ss_gray.str());
+
+    // //! [Retinex]
+    // vpImage<vpRGBa> I_color_retinex;
+    // VISP_NAMESPACE_NAME::retinex(I_color, I_color_retinex, scale, scaleDiv, level, dynamic, kernelSize);
+    // // Retinex uses color image as input
+    // // Convert gray image into RGBa format for quick test
+    // vpImage<vpRGBa> I_gray_color;
+    // vpImageConvert::convert(I_gray, I_gray_color);
+    // vpImage<vpRGBa> I_gray_color_retinex;
+    // VISP_NAMESPACE_NAME::retinex(I_gray_color, I_gray_color_retinex, scale, scaleDiv, level, dynamic, kernelSize);
+    // // Convert back to gray
+    // vpImage<unsigned char> I_gray_retinex;
+    // vpImageConvert::convert(I_gray_color_retinex, I_gray_retinex);
+    // //! [Retinex]
+
+    // ss_color.str("");
+    // ss_color << input_name << "_Retinex_scale=" << scale << "_scaleDiv=" << scaleDiv << "_level=" << level
+    //   << "_dynamic=" << dynamic << "_kernelSize=" << kernelSize << ".png";
+    // ss_gray.str("");
+    // ss_gray << input_name << "_Retinex_scale=" << scale << "_scaleDiv=" << scaleDiv << "_level=" << level
+    //   << "_dynamic=" << dynamic << "_kernelSize=" << kernelSize << "_gray.png";
+    // display(I_display, I_color_res, I_color_retinex, I_gray_res, I_gray_retinex, I_gray_display,
+    //   "Retinex. Click to quit.", ss_color.str(), ss_gray.str());
+  } while (!reader.end());
 #else
   (void)argc;
   (void)argv;
