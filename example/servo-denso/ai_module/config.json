@@ -1,8 +1,11 @@
 {
-  "model_path": "ai_module/models/cube_detector_int8_edgetpu.tflite",
-  "cpu_model_path": "ai_module/models/cube_detector_int8.tflite",
+  "model_path": "ai_module/models/cylinder_detector_int8_edgetpu.tflite",
+  "cpu_model_path": "ai_module/models/cylinder_detector_int8.tflite",
   "confidence_threshold": 0.5,
   "image_size": 320,
-  "class_names": ["cube"],
+  "class_names": [
+    "cylinder"
+  ],
+  // "python_bin": "/home/nam/.pyenv/versions/3.9.17/envs/gesture_env/bin/python3"
   "python_bin": "python3"
 }

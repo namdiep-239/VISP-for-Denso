@@ -247,10 +247,11 @@ bool gripperClose(serialib *gripper)
   return false;
 }
 // Run Python AI detection on the current frame.
-// Saves frame to /tmp/visp_ai_frame.jpg, then spawns detect_cube.py as a subprocess.
+// Saves frame to /tmp/visp_ai_frame.jpg, then spawns detect_cylinder.py as a subprocess.
 // Returns true on success and sets detected_center to vpImagePoint(v, u).
 // Falls back gracefully: caller should call dot.initTracking(I) if this returns false.
-bool detectCubeWithAI(const vpImage<unsigned char> &I,
+// TODO: retune confidence_threshold in config.json if cylinder model scores differ from cube model.
+bool detectCylinderWithAI(const vpImage<unsigned char> &I,
                       vpImagePoint &detected_center,
                       const std::string &config_path = "ai_module/config.json")
 {
@@ -278,14 +279,14 @@ bool detectCubeWithAI(const vpImage<unsigned char> &I,
     return false;
   }
 
-  // Resolve detect_cube.py path from the same directory as config.json
+  // Resolve detect_cylinder.py path from the same directory as config.json
   std::string script_dir;
   auto slash_pos = config_path.rfind('/');
   if (slash_pos != std::string::npos)
     script_dir = config_path.substr(0, slash_pos);
   else
     script_dir = ".";
-  std::string cmd = python_bin + " " + script_dir + "/detect_cube.py /tmp/visp_ai_frame.jpg";
+  std::string cmd = python_bin + " " + script_dir + "/detect_cylinder.py /tmp/visp_ai_frame.jpg";
 
   FILE *pipe = popen(cmd.c_str(), "r");
   if (!pipe) {
@@ -507,8 +508,8 @@ int main()
         if (reached) {
           std::cout << "pose init oke" << std::endl;
           vpImagePoint ai_hint;
-          if (detectCubeWithAI(I, ai_hint)) {
-            std::cout << "[AI] Cube detected at: " << ai_hint << std::endl;
+          if (detectCylinderWithAI(I, ai_hint)) {
+            std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
             dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
           } else {
             std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
