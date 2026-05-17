@@ -1,0 +1,14 @@
+# Package Information for pkg-config
+
+prefix=/usr
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: ViSP
+Description: Visual Servoing Platform
+URL: https://visp.inria.fr
+Version: 3.7.1
+Libs:  -Wl,-rpath,${libdir} -L${libdir} -lvisp_detection -lvisp_imgproc -lvisp_robot -lvisp_sensor -lvisp_dnn_tracker -lvisp_mbt -lvisp_ar -lvisp_klt -lvisp_gui -lvisp_tt_mi -lvisp_tt -lvisp_vision -lvisp_vs -lvisp_visual_features -lvisp_blob -lvisp_me -lvisp_io -lvisp_core  -L/usr/lib/x86_64-linux-gnu -lopencv_core -lopencv_highgui -lopencv_features2d -llapack -lcblas -latlas -lz -L/usr/lib/gcc/x86_64-linux-gnu/11 -lgomp -lzbar -lopencv_objdetect -lopencv_dnn -lopencv_videoio -lopencv_imgcodecs -lopencv_imgproc -lv4l2 -lv4lconvert -ldc1394 -lopencv_video -lopencv_calib3d -lopencv_flann
+
+Cflags:  -fopenmp -std=c++17 -I${includedir} -I/usr/include/opencv4 -I/usr/include/eigen3 -I/usr/include/x86_64-linux-gnu -I/usr/include

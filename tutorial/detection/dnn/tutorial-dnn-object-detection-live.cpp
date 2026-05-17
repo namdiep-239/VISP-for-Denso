@@ -292,7 +292,6 @@ int main(int argc, const char *argv[])
       std::cout << "Capture from camera: " << opt_device << " didn't work" << std::endl;
       return EXIT_FAILURE;
     }
-
     vpImage<vpRGBa> I;
     display->setDownScalingFactor(vpDisplay::SCALE_AUTO);
 
@@ -300,7 +299,6 @@ int main(int argc, const char *argv[])
       throw(vpException(vpException::fatalError,
                         "The file containing the classes labels \"" + opt_dnn_label_file + "\" does not exist !"));
     }
-
     vpDetectorDNNOpenCV dnn;
 #ifdef VISP_HAVE_NLOHMANN_JSON
     if (!opt_input_json.empty()) {

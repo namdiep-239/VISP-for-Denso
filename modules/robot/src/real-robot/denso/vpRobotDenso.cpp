@@ -175,6 +175,14 @@ bool vpRobotDenso6577::sendPosition(double *q)
   }
   return true;
 }
+void vpRobotDenso6577::flush()
+{
+  char c;
+  // Đọc hết những gì còn trong buffer
+  while (serial.readChar(&c, 1) == 1) {
+    // bỏ qua dữ liệu
+  }
+}
 /*!
 
   Emergency stops the robot if the program is interrupted by a SIGINT
@@ -2405,7 +2413,7 @@ vpColVector vpRobotDenso6577::getForceTorque() const
   ();
   if (// TryStt < 0) {
     vpERROR_TRACE("Cannot get the force/torque measures.");
-    throw vpRobotException(vpRobotException::lowLevelError, "Cannot get force/torque measures.");
+  throw vpRobotException(vpRobotException::lowLevelError, "Cannot get force/torque measures.");
 }
 return H; // Here to avoid a warning, but should never be called
 #endif

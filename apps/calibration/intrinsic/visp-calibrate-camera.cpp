@@ -135,6 +135,7 @@ int main(int argc, const char *argv[])
     const std::string opt_inputSettingsFile = argc > 1 ? argv[1] : "default.cfg";
     std::string opt_init_camera_xml_file;
     std::string opt_camera_name = "Camera";
+    std::string opt_output_folder = ".";
     double opt_aspect_ratio = -1; // Not used
 
     for (int i = 2; i < argc; i++) {
@@ -153,6 +154,9 @@ int main(int argc, const char *argv[])
       else if (std::string(argv[i]) == "--help" || std::string(argv[i]) == "-h") {
         usage(argv, 0);
         return EXIT_SUCCESS;
+      }
+      else if (std::string(argv[i]) == "--output-folder" && i + 1 < argc) {
+        opt_output_folder = std::string(argv[++i]);
       }
       else {
         usage(argv, i);
@@ -399,6 +403,9 @@ int main(int argc, const char *argv[])
       vpDisplay::getClick(I_color);
     }
     else {
+      std::stringstream ss_img;
+      ss_img << opt_output_folder + "/occupancy.png";
+      vpImageIo::write(I_color, ss_img.str());
       vpDisplay::flush(I_color);
       vpTime::wait(s.tempo * 1000);
     }
@@ -469,7 +476,9 @@ int main(int argc, const char *argv[])
           vpMeterPixelConversion::convertPoint(cam, pt.get_x(), pt.get_y(), imPt);
           vpDisplay::displayCross(I, imPt, 12 * vpDisplay::getDownScalingFactor(I), vpColor::green);
         }
-
+        std::stringstream ss_img;
+        ss_img << opt_output_folder + "/without_projection" << i << ".png";
+        vpImageIo::write(I, ss_img.str());
         if (s.tempo > 10.f) {
           vpDisplay::displayText(I, I.getHeight() - 20 * vpDisplay::getDownScalingFactor(I),
                                15 * vpDisplay::getDownScalingFactor(I), "Click to continue...", vpColor::red);
@@ -548,7 +557,9 @@ int main(int argc, const char *argv[])
           vpMeterPixelConversion::convertPoint(cam, pt.get_x(), pt.get_y(), imPt);
           vpDisplay::displayCross(I, imPt, 12 * vpDisplay::getDownScalingFactor(I), vpColor::green);
         }
-
+        std::stringstream ss_img;
+        ss_img << opt_output_folder + "/with_projection" << i << ".png";
+        vpImageIo::write(I, ss_img.str());
         if (s.tempo > 10.f) {
           vpDisplay::displayText(I, I.getHeight() - 20 * vpDisplay::getDownScalingFactor(I),
                                15 * vpDisplay::getDownScalingFactor(I), "Click to continue...", vpColor::red);
@@ -657,6 +668,7 @@ int main(int argc, const char *argv[])
           vpDisplay::getClick(I_dist_undist);
         }
         else {
+
           vpDisplay::flush(I_dist_undist);
           vpTime::wait(s.tempo * 1000);
         }
