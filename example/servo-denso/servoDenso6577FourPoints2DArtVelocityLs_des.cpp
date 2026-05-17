@@ -272,7 +272,7 @@ bool detectCylinderWithAI(const vpImage<unsigned char> &I,
       std::cerr << "[AI] Cannot open config: " << config_path << std::endl;
       return false;
     }
-    nlohmann::json cfg = nlohmann::json::parse(cfg_file);
+    nlohmann::json cfg = nlohmann::json::parse(cfg_file, nullptr, true, true);
     python_bin = cfg.value("python_bin", "/usr/bin/python3");
   } catch (const std::exception &e) {
     std::cerr << "[AI] Config parse error: " << e.what() << std::endl;

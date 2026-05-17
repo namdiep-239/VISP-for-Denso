@@ -1,7 +1,7 @@
 {
   "model_path": "ai_module/models/cylinder_detector_int8_edgetpu.tflite",
   "cpu_model_path": "ai_module/models/cylinder_detector_int8.tflite",
-  "confidence_threshold": 0.5,
+  "confidence_threshold": 0.7,
   "image_size": 320,
   "class_names": [
     "cylinder"
