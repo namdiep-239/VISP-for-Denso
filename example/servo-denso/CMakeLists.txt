@@ -66,6 +66,10 @@ endif()
 
 find_package(VISP REQUIRED visp_core visp_blob visp_vs visp_robot visp_sensor visp_vision visp_gui)
 
+# AI module: detect_cylinder.py is called at runtime via subprocess — no CMake dependency needed.
+# Requires: python3 with pycoral, tflite-runtime / ai-edge-litert, opencv-python, numpy
+# Model:    ai_module/models/cylinder_detector_int8_edgetpu.tflite (Google Coral EdgeTPU)
+
 set(example_cpp
     servoDenso-EyeToHand-Lcur_cVf_fVe_eJe.cpp
     servoDenso6577FourPoints2DArtVelocityLs_des.cpp
