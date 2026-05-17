@@ -463,6 +463,7 @@ int main()
   bool pose_init = false;
   bool sendClassified = false;
   bool flushedGripper = false;
+  bool init_feature = false;
   vpChrono chrono, chrene;
   for (;;) {
     cap >> frame;
@@ -532,7 +533,10 @@ int main()
 
             p.set_Z(1);
 
-            task.addFeature(p, pd);
+            if (!init_feature) {
+              task.addFeature(p, pd);
+              init_feature = true;
+            }
             task.print();
 
             pose_init = true;
@@ -703,7 +707,6 @@ int main()
           sendClassified = false;
           pose_init = false;
           gripper_init = false;
-          task.kill();
           std::cout << "###########################################################################" <<std::endl;
           chrono.stop();
           std::cout << "COMPLETE ONE " << chrono.getDurationMs() << std::endl;
