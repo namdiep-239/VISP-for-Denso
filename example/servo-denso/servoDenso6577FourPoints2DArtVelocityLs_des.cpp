@@ -454,7 +454,7 @@ int main()
   vpColVector q_cur(6), q_new(6);
   const uint8_t *converged = (const uint8_t *)"OKE\r";
   int state = PREINIT;
-  bool gripper_init = true;
+  bool gripper_init = false;
   bool pose_init = false;
   bool sendClassified = false;
   bool flushedGripper = false;
