@@ -145,7 +145,8 @@ def main():
     hint = args.hint  # None  or  [u, v]
 
     cfg = load_config()
-    threshold = cfg.get("confidence_threshold", 0.5)
+    threshold = cfg.get("confidence_threshold", 0.7)
+    max_jump  = cfg.get("max_jump_pixels", 80)
 
     # EdgeTPU model path (pycoral only — contains custom op, cannot run on plain CPU)
     edgetpu_path_str = cfg.get("model_path", "ai_module/models/cylinder_detector_int8_edgetpu.tflite")
@@ -216,9 +217,19 @@ def main():
         return
 
     if hint is None:
-        # INIT: no prior position — pick highest confidence
-        best_box, best_score = max(candidates, key=lambda x: x[1])
-        print(f"[AI] INIT selection: highest confidence", file=sys.stderr)
+        # INIT: no prior position — pick the cylinder closest to the image
+        # center. The robot is positioned so the target should be near the
+        # center of the field of view; this is more stable than highest
+        # confidence when multiple cylinders are present.
+        img_h, img_w = img_bgr.shape[:2]
+        cx, cy = img_w / 2.0, img_h / 2.0
+        def dist_to_center(item):
+            b, _ = item
+            bx = (b[0] + b[2]) / 2.0
+            by = (b[1] + b[3]) / 2.0
+            return (bx - cx) ** 2 + (by - cy) ** 2
+        best_box, best_score = min(candidates, key=dist_to_center)
+        print(f"[AI] INIT selection: closest to image center ({cx:.0f}, {cy:.0f})", file=sys.stderr)
     else:
         # JOINT: pick the detection closest to the last known position,
         # so the robot keeps tracking the same cylinder despite score fluctuations
@@ -229,7 +240,18 @@ def main():
             by = (b[1] + b[3]) / 2.0
             return (bx - ref_u) ** 2 + (by - ref_v) ** 2
         best_box, best_score = min(candidates, key=dist_to_hint)
-        print(f"[AI] JOINT selection: closest to hint ({ref_u:.1f}, {ref_v:.1f})", file=sys.stderr)
+
+        # Reject if the closest candidate is still too far from the hint.
+        # This happens when the target cylinder drops below the confidence
+        # threshold and only a different cylinder remains in candidates.
+        # Returning FAILURE lets C++ hold the last valid ai_hint position.
+        x1c, y1c, x2c, y2c = best_box
+        jump = ((x1c + x2c) / 2.0 - ref_u) ** 2 + ((y1c + y2c) / 2.0 - ref_v) ** 2
+        jump = jump ** 0.5
+        if jump > max_jump:
+            print(f"FAILURE jump_rejected:{jump:.1f}px_exceeds_{max_jump}px", flush=True)
+            return
+        print(f"[AI] JOINT selection: closest to hint ({ref_u:.1f}, {ref_v:.1f}), dist={jump:.1f}px", file=sys.stderr)
 
     x1, y1, x2, y2 = best_box
     width = x2 - x1
