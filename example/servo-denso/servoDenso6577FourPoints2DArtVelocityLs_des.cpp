@@ -263,9 +263,12 @@ bool gripperClose(serialib *gripper)
 // Returns true on success and sets detected_center to vpImagePoint(v, u).
 // Falls back gracefully: caller should call dot.initTracking(I) if this returns false.
 // TODO: retune confidence_threshold in config.json if cylinder model scores differ from cube model.
+// hint: if non-null, script picks the cylinder closest to hint (JOINT mode).
+//       if null,     script picks the highest-confidence cylinder (INIT mode).
 bool detectCylinderWithAI(const vpImage<unsigned char> &I,
-                      vpImagePoint &detected_center,
-                      const std::string &config_path = "ai_module/config.json")
+                          vpImagePoint &detected_center,
+                          const std::string &config_path = "ai_module/config.json",
+                          const vpImagePoint *hint = nullptr)
 {
   // Convert grayscale vpImage to BGR cv::Mat — model expects 3-channel input
   cv::Mat gray_mat, bgr_mat;
@@ -300,6 +303,8 @@ bool detectCylinderWithAI(const vpImage<unsigned char> &I,
   else
     script_dir = ".";
   std::string cmd = python_bin + " " + script_dir + "/detect_cylinder.py /tmp/visp_ai_frame.jpg";
+  if (hint != nullptr)
+    cmd += " --hint " + std::to_string(hint->get_u()) + " " + std::to_string(hint->get_v());
 
   FILE *pipe = popen(cmd.c_str(), "r");
   if (!pipe) {
@@ -513,8 +518,9 @@ int main()
           std::abs(q_cur[5] - q_new[5])   < 0.01;
         if (reached) {
           try {
+            // INIT: no hint — pick highest-confidence cylinder
             if (detectCylinderWithAI(I, ai_hint)) {
-              std::cout << "[AI] Cube detected at: " << ai_hint << std::endl;
+              std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
             }
             else {
               std::cout << "[AI] Detection fail, fallback to init click." << std::endl;
@@ -555,11 +561,15 @@ int main()
 
       if (reached) {
         try {
-          if (detectCylinderWithAI(I, ai_hint)) {
-            std::cout << "[AI] Cube detected visual servoing at: " << ai_hint << std::endl;
+          // JOINT: pass &ai_hint so Python picks the cylinder closest to
+          // the last known position, not the highest-confidence one.
+          // This prevents the servo from jumping to a different cylinder
+          // when scores fluctuate as the robot moves.
+          if (detectCylinderWithAI(I, ai_hint, "ai_module/config.json", &ai_hint)) {
+            std::cout << "[AI] Cylinder tracked at: " << ai_hint << std::endl;
           }
           else {
-            std::cout << "[AI] Lost detect when visual servoing." << std::endl;
+            std::cout << "[AI] Lost detection, holding last position." << std::endl;
           }
         }
         catch (const vpTrackingException &e) {
