@@ -69,6 +69,9 @@
 #include <visp3/vs/vpServoDisplay.h>
 #include <visp3/core/vpXmlParserCamera.h>
 #include <opencv2/videoio.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+
 #include <visp3/core/vpImageConvert.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -190,9 +193,10 @@ bool gripperOpen(serialib *gripper)
 {
   char buffer[256];
   json object = {
-            {"T", 101},
-            {"spd", 500},
-            {"acc", 0}
+                  {"T", 121},
+                  {"acc", 20.0},
+                  {"angle", 1.7486619853687655}, // Góc mở
+                  {"spd", 200.0}
   };
 
   // Tạo chuỗi command
@@ -226,9 +230,10 @@ bool gripperClose(serialib *gripper)
 {
   char buffer[256];
   json object = {
-          {"T", 102},
-          {"spd", 500},
-          {"acc", 20}
+                  {"T", 121},
+                  {"acc", 20.0},
+                  {"angle", 3.1447332076700687}, // Góc mở
+                  {"spd", 200.0}
   };
 
   // Tạo chuỗi command trực tiếp
@@ -252,6 +257,90 @@ bool gripperClose(serialib *gripper)
       return false;
     }
   }
+  return false;
+}
+// Run Python AI detection on the current frame.
+// Saves frame to /tmp/visp_ai_frame.jpg, then spawns detect_cube.py as a subprocess.
+// Returns true on success and sets detected_center to vpImagePoint(v, u).
+// Falls back gracefully: caller should call dot.initTracking(I) if this returns false.
+bool detectCubeWithAI(const vpImage<unsigned char> &I,
+                      vpImagePoint &detected_center,
+                      const std::string &config_path = "ai_module/config.json")
+{
+  // Convert grayscale vpImage to BGR cv::Mat — model expects 3-channel input
+  cv::Mat gray_mat, bgr_mat;
+  vpImageConvert::convert(I, gray_mat);
+  cv::cvtColor(gray_mat, bgr_mat, cv::COLOR_GRAY2BGR);
+  if (!cv::imwrite("/tmp/visp_ai_frame.jpg", bgr_mat)) {
+    std::cerr << "[AI] Failed to save frame to /tmp/visp_ai_frame.jpg" << std::endl;
+    return false;
+  }
+
+  // Read python_bin from config.json (nlohmann::json already available via vpJSON.h)
+  std::string python_bin;
+  try {
+    std::ifstream cfg_file(config_path);
+    if (!cfg_file.is_open()) {
+      std::cerr << "[AI] Cannot open config: " << config_path << std::endl;
+      return false;
+    }
+    nlohmann::json cfg = nlohmann::json::parse(cfg_file);
+    python_bin = cfg.value("python_bin", "/usr/bin/python3");
+  }
+  catch (const std::exception &e) {
+    std::cerr << "[AI] Config parse error: " << e.what() << std::endl;
+    return false;
+  }
+
+  // Resolve detect_cube.py path from the same directory as config.json
+  std::string script_dir;
+  auto slash_pos = config_path.rfind('/');
+  if (slash_pos != std::string::npos)
+    script_dir = config_path.substr(0, slash_pos);
+  else
+    script_dir = ".";
+  std::string cmd = python_bin + " " + script_dir + "/detect_cube.py /tmp/visp_ai_frame.jpg";
+
+  FILE *pipe = popen(cmd.c_str(), "r");
+  if (!pipe) {
+    std::cerr << "[AI] popen failed: " << cmd << std::endl;
+    return false;
+  }
+
+  // 3-second timeout via POSIX select()
+  int fd = fileno(pipe);
+  fd_set rfds;
+  struct timeval tv;
+  FD_ZERO(&rfds);
+  FD_SET(fd, &rfds);
+  tv.tv_sec = 3;
+  tv.tv_usec = 0;
+  if (select(fd + 1, &rfds, nullptr, nullptr, &tv) <= 0) {
+    std::cerr << "[AI] Subprocess timeout (3 s)" << std::endl;
+    pclose(pipe);
+    return false;
+  }
+
+  char line[512] = {};
+  if (fgets(line, sizeof(line), pipe) == nullptr) {
+    pclose(pipe);
+    return false;
+  }
+  pclose(pipe);
+
+  std::string result(line);
+  if (result.rfind("SUCCESS", 0) == 0) {
+    double u = 0, v = 0, conf = 0, x = 0, y = 0, w = 0, h = 0;
+    if (std::sscanf(line, "SUCCESS %lf %lf %lf %lf %lf %lf %lf",
+                    &u, &v, &conf, &x, &y, &w, &h) == 7) {
+      detected_center = vpImagePoint(v, u);
+      return true;
+    }
+    std::cerr << "[AI] Malformed SUCCESS line: " << result;
+    return false;
+  }
+  if (result.rfind("FAILURE", 0) == 0)
+    std::cerr << "[AI] " << result;
   return false;
 }
 int main()
@@ -343,29 +432,8 @@ int main()
   vpRobotDenso6577 robot;
   robot.init(); // param: redefine tool and camera extrinsic parameters for eMC
   robot.set_eMc(e_M_c);
-  // ========================
-  // Visual feature
-  // ========================
-  vpDot2 blob;
-  std::list<vpDot2> blob_list;
-  blob.setWidth(21);
-  blob.setHeight(21);
-  blob.setGrayLevelMin(0);
-  blob.setGrayLevelMax(80);
-  blob.setGrayLevelPrecision(0.8);
-  blob.setSizePrecision(0.65);
-  blob.setEllipsoidShapePrecision(0.65);
 
-  std::cout << "Blob characteristics: " << std::endl;
-  std::cout << " width : " << blob.getWidth() << std::endl;
-  std::cout << " height: " << blob.getHeight() << std::endl;
-  std::cout << " gray level min: " << blob.getGrayLevelMin() << std::endl;
-  std::cout << " gray level max: " << blob.getGrayLevelMax() << std::endl;
-  std::cout << " grayLevelPrecision: " << blob.getGrayLevelPrecision() << std::endl;
-  std::cout << " sizePrecision: " << blob.getSizePrecision() << std::endl;
-  std::cout << " ellipsoidShapePrecision: " << blob.getEllipsoidShapePrecision() << std::endl;
-  vpDot2 dot;
-  vpImagePoint cog;
+  vpImagePoint ai_hint;
 
   vpTRACE("sets the current position of the visual feature ");
   vpFeaturePoint p;
@@ -433,53 +501,47 @@ int main()
       //     gripperStatus = OPENED;
       //   }
       // }
-      if (!pose_init) {
-        robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-        q_cur.rad2deg();
-        bool reached =
-          std::abs(q_cur[0] - q_new[0])   < 0.01 &&
-          std::abs(q_cur[1] - q_new[1])   < 0.01 &&
-          std::abs(q_cur[2] - q_new[2])  < 0.01 &&
-          std::abs(q_cur[3] - q_new[3])   < 0.01 &&
-          std::abs(q_cur[4] - q_new[4])  < 0.01 &&
-          std::abs(q_cur[5] - q_new[5])   < 0.01;
-        if (reached) {
-          try {
-            vpImageConvert::convert(frame, I);
-            vpDisplay::display(I);
-            blob.searchDotsInArea(I, 0, 0, I.getWidth(), I.getHeight(), blob_list);
+      // if (!pose_init) {
+      //   robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+      //   q_cur.rad2deg();
+      //   bool reached =
+      //     std::abs(q_cur[0] - q_new[0])   < 0.01 &&
+      //     std::abs(q_cur[1] - q_new[1])   < 0.01 &&
+      //     std::abs(q_cur[2] - q_new[2])  < 0.01 &&
+      //     std::abs(q_cur[3] - q_new[3])   < 0.01 &&
+      //     std::abs(q_cur[4] - q_new[4])  < 0.01 &&
+      //     std::abs(q_cur[5] - q_new[5])   < 0.01;
+      //   if (reached) {
+      //     try {
+      //       if (detectCubeWithAI(I, ai_hint)) {
+      //         std::cout << "[AI] Cube detected at: " << ai_hint << std::endl;
+      //       }
+      //       else {
+      //         std::cout << "[AI] Detection fail, fallback to init click." << std::endl;
+      //       }
+      //       vpDisplay::displayCross(I, ai_hint, 10, vpColor::blue);
+      //       vpDisplay::flush(I);
 
-            if (blob_list.size() > 0) {
-              dot = *(blob_list.begin());
-              cog = dot.getCog();
-              blob_list.pop_front();
+      //       vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
 
-              vpDisplay::displayCross(I, cog, 10, vpColor::blue);
-              vpDisplay::flush(I);
+      //       p.set_Z(1);
 
-              vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
+      //       task.addFeature(p, pd);
+      //       task.print();
 
-              p.set_Z(1);
+      //       pose_init = true;
 
-              task.addFeature(p, pd);
-              task.print();
-
-              pose_init = true;
-            }
-            else {
-              continue;
-            }
-          }
-          catch (const vpTrackingException &e) {
-          }
-        }
-      }
-      if (pose_init && gripper_init) {
-        chrono.start(true);
-        chrene.start(true);
-        state = JOINT;
-        q_cur = q_new.deg2rad();
-      }
+      //     }
+      //     catch (const vpTrackingException &e) {
+      //     }
+      //   }
+      // }
+      // if (pose_init && gripper_init) {
+      //   chrono.start(true);
+      //   chrene.start(true);
+      //   state = JOINT;
+      //   q_cur = q_new.deg2rad();
+      // }
     }
     else if (state == JOINT) {
       robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
@@ -493,8 +555,12 @@ int main()
 
       if (reached) {
         try {
-          dot.track(I);
-          cog = dot.getCog();
+          if (detectCubeWithAI(I, ai_hint)) {
+            std::cout << "[AI] Cube detected visual servoing at: " << ai_hint << std::endl;
+          }
+          else {
+            std::cout << "[AI] Lost detect when visual servoing." << std::endl;
+          }
         }
         catch (const vpTrackingException &e) {
           sendClassified = false;
@@ -505,10 +571,9 @@ int main()
           continue;
         }
         // Display a green cross at the center of gravity position in the image
-        vpDisplay::displayCross(I, cog, 10, vpColor::green);
+        vpDisplay::displayCross(I, ai_hint, 10, vpColor::green);
 
-
-        vpFeatureBuilder::create(p, cam, dot);
+        vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
         robot.get_eJe(eJe);
         task.set_eJe(eJe);
 
@@ -557,88 +622,88 @@ int main()
         // state = CLASSIFIED;
       // }
     }
-    else if (state == CLASSIFIED) {
-      // gripperClose(gripper);
-      vpTime::wait(1000);
-      // SEND oke to RC5 controller
-      //
-      // robot.uartSend(converged, 4);
-      if (!sendClassified) {
-        q_new[0] = 0;
-        q_new[1] = 0;
-        q_new[2] = 90;
-        q_new[3] = 0;
-        q_new[4] = 90;
-        q_new[5] = 0;
+    // else if (state == CLASSIFIED) {
+    //   // gripperClose(gripper);
+    //   vpTime::wait(1000);
+    //   // SEND oke to RC5 controller
+    //   //
+    //   // robot.uartSend(converged, 4);
+    //   if (!sendClassified) {
+    //     q_new[0] = 0;
+    //     q_new[1] = 0;
+    //     q_new[2] = 90;
+    //     q_new[3] = 0;
+    //     q_new[4] = 90;
+    //     q_new[5] = 0;
 
-        robot.sendPosition(q_new.data);
-        sendClassified = true;
-      }
-      // gripperClose(gripper);
-      robot.flush();
-      robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-      q_cur.rad2deg();
-      bool reached =
-        std::abs(q_cur[0] - q_new[0])   < 0.01 &&
-        std::abs(q_cur[1] - q_new[1])   < 0.01 &&
-        std::abs(q_cur[2] - q_new[2])  < 0.01 &&
-        std::abs(q_cur[3] - q_new[3])   < 0.01 &&
-        std::abs(q_cur[4] - q_new[4])  < 0.01 &&
-        std::abs(q_cur[5] - q_new[5])   < 0.01;
+    //     robot.sendPosition(q_new.data);
+    //     sendClassified = true;
+    //   }
+    //   // gripperClose(gripper);
+    //   robot.flush();
+    //   robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+    //   q_cur.rad2deg();
+    //   bool reached =
+    //     std::abs(q_cur[0] - q_new[0])   < 0.01 &&
+    //     std::abs(q_cur[1] - q_new[1])   < 0.01 &&
+    //     std::abs(q_cur[2] - q_new[2])  < 0.01 &&
+    //     std::abs(q_cur[3] - q_new[3])   < 0.01 &&
+    //     std::abs(q_cur[4] - q_new[4])  < 0.01 &&
+    //     std::abs(q_cur[5] - q_new[5])   < 0.01;
 
-      if (reached) {
-        sendClassified = false;
-        state = NEXT_STEP;
-      }
-    }
-    else if (state == NEXT_STEP) {
-      if (!sendClassified) {
-        q_new[0] = -90;
-        q_new[1] = 50;
-        q_new[2] = 100;
-        q_new[3] = 0;
-        q_new[4] = 40;
-        q_new[5] = 0;
+    //   if (reached) {
+    //     sendClassified = false;
+    //     state = NEXT_STEP;
+    //   }
+    // }
+    // else if (state == NEXT_STEP) {
+    //   if (!sendClassified) {
+    //     q_new[0] = -90;
+    //     q_new[1] = 50;
+    //     q_new[2] = 100;
+    //     q_new[3] = 0;
+    //     q_new[4] = 40;
+    //     q_new[5] = 0;
 
-        robot.sendPosition(q_new.data);
+    //     robot.sendPosition(q_new.data);
 
-        q_cur.rad2deg();
-        // gripperClose(gripper);
-        sendClassified = true;
-      }
-      robot.flush();
-      robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-      q_cur.rad2deg();
-      bool reached =
-        std::abs(q_cur[0] - q_new[0])   < 0.01 &&
-        std::abs(q_cur[1] - q_new[1])   < 0.01 &&
-        std::abs(q_cur[2] - q_new[2])  < 0.01 &&
-        std::abs(q_cur[3] - q_new[3])   < 0.01 &&
-        std::abs(q_cur[4] - q_new[4])  < 0.01 &&
-        std::abs(q_cur[5] - q_new[5])   < 0.01;
+    //     q_cur.rad2deg();
+    //     // gripperClose(gripper);
+    //     sendClassified = true;
+    //   }
+    //   robot.flush();
+    //   robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+    //   q_cur.rad2deg();
+    //   bool reached =
+    //     std::abs(q_cur[0] - q_new[0])   < 0.01 &&
+    //     std::abs(q_cur[1] - q_new[1])   < 0.01 &&
+    //     std::abs(q_cur[2] - q_new[2])  < 0.01 &&
+    //     std::abs(q_cur[3] - q_new[3])   < 0.01 &&
+    //     std::abs(q_cur[4] - q_new[4])  < 0.01 &&
+    //     std::abs(q_cur[5] - q_new[5])   < 0.01;
 
-      if (reached) {
-        // vpTime::wait(3000);
-        if (!flushedGripper) {
-          gripperClose(gripper);
-          gripperFlush(gripper);
-          flushedGripper = true;
-        }
-        if (gripperOpen(gripper)) {
-          sendClassified = false;
-          pose_init = false;
-          gripper_init = false;
-          task.kill();
-          std::cout << "###########################################################################" <<std::endl;
-          chrono.stop();
-          std::cout << "COMPLETE ONE " << chrono.getDurationMs() << std::endl;
-          state = PREINIT;
-        }
-      }
-      else {
-        gripperClose(gripper);
-      }
-    }
+    //   if (reached) {
+    //     // vpTime::wait(3000);
+    //     if (!flushedGripper) {
+    //       gripperClose(gripper);
+    //       gripperFlush(gripper);
+    //       flushedGripper = true;
+    //     }
+    //     if (gripperOpen(gripper)) {
+    //       sendClassified = false;
+    //       pose_init = false;
+    //       gripper_init = false;
+    //       task.kill();
+    //       std::cout << "###########################################################################" <<std::endl;
+    //       chrono.stop();
+    //       std::cout << "COMPLETE ONE " << chrono.getDurationMs() << std::endl;
+    //       state = PREINIT;
+    //     }
+    //   }
+    //   else {
+    //     gripperClose(gripper);
+    //   }
+    // }
     vpDisplay::flush(I);
   }
   return EXIT_SUCCESS;
