@@ -4,7 +4,12 @@ Single-image cylinder detection for ViSP-for-Denso integration.
 Called as a subprocess by the C++ application.
 
 Usage:
-    python3 detect_cylinder.py <image_path>
+    python3 detect_cylinder.py <image_path> [--hint U V]
+
+    No --hint  → pick the highest-confidence detection (used at INIT).
+    --hint U V → pick the detection closest to pixel (U, V) (used at JOINT
+                 to maintain temporal consistency when multiple cylinders
+                 are visible and confidence scores fluctuate).
 
 Stdout (exactly one line, no extras):
     SUCCESS <u_center> <v_center> <confidence> <x_min> <y_min> <width> <height>
@@ -15,7 +20,7 @@ All debug/warning output goes to stderr only.
 """
 
 import sys
-import os
+import argparse
 import json
 from pathlib import Path
 
@@ -130,11 +135,14 @@ def run_inference(interpreter, input_details, output_details, img_bgr):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("FAILURE missing_image_path", flush=True)
-        sys.exit(1)
-
-    image_path = sys.argv[1]
+    parser = argparse.ArgumentParser()
+    parser.add_argument("image_path")
+    parser.add_argument("--hint", type=float, nargs=2, default=None,
+                        metavar=("U", "V"),
+                        help="Last known center (col, row) for closest-match selection")
+    args = parser.parse_args()
+    image_path = args.image_path
+    hint = args.hint  # None  or  [u, v]
 
     cfg = load_config()
     threshold = cfg.get("confidence_threshold", 0.5)
@@ -207,7 +215,22 @@ def main():
         print("FAILURE no_detection", flush=True)
         return
 
-    best_box, best_score = max(candidates, key=lambda x: x[1])
+    if hint is None:
+        # INIT: no prior position — pick highest confidence
+        best_box, best_score = max(candidates, key=lambda x: x[1])
+        print(f"[AI] INIT selection: highest confidence", file=sys.stderr)
+    else:
+        # JOINT: pick the detection closest to the last known position,
+        # so the robot keeps tracking the same cylinder despite score fluctuations
+        ref_u, ref_v = hint
+        def dist_to_hint(item):
+            b, _ = item
+            bx = (b[0] + b[2]) / 2.0
+            by = (b[1] + b[3]) / 2.0
+            return (bx - ref_u) ** 2 + (by - ref_v) ** 2
+        best_box, best_score = min(candidates, key=dist_to_hint)
+        print(f"[AI] JOINT selection: closest to hint ({ref_u:.1f}, {ref_v:.1f})", file=sys.stderr)
+
     x1, y1, x2, y2 = best_box
     width = x2 - x1
     height = y2 - y1
