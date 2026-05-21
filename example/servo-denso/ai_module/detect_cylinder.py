@@ -4,12 +4,7 @@ Single-image cylinder detection for ViSP-for-Denso integration.
 Called as a subprocess by the C++ application.
 
 Usage:
-    python3 detect_cylinder.py <image_path> [--hint U V]
-
-    No --hint  → pick the highest-confidence detection (used at INIT).
-    --hint U V → pick the detection closest to pixel (U, V) (used at JOINT
-                 to maintain temporal consistency when multiple cylinders
-                 are visible and confidence scores fluctuate).
+    python3 detect_cylinder.py <image_path>
 
 Stdout (exactly one line, no extras):
     SUCCESS <u_center> <v_center> <confidence> <x_min> <y_min> <width> <height>
@@ -20,7 +15,7 @@ All debug/warning output goes to stderr only.
 """
 
 import sys
-import argparse
+import os
 import json
 from pathlib import Path
 
@@ -135,18 +130,14 @@ def run_inference(interpreter, input_details, output_details, img_bgr):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("image_path")
-    parser.add_argument("--hint", type=float, nargs=2, default=None,
-                        metavar=("U", "V"),
-                        help="Last known center (col, row) for closest-match selection")
-    args = parser.parse_args()
-    image_path = args.image_path
-    hint = args.hint  # None  or  [u, v]
+    if len(sys.argv) < 2:
+        print("FAILURE missing_image_path", flush=True)
+        sys.exit(1)
+
+    image_path = sys.argv[1]
 
     cfg = load_config()
-    threshold = cfg.get("confidence_threshold", 0.7)
-    max_jump  = cfg.get("max_jump_pixels", 80)
+    threshold = cfg.get("confidence_threshold", 0.5)
 
     # EdgeTPU model path (pycoral only — contains custom op, cannot run on plain CPU)
     edgetpu_path_str = cfg.get("model_path", "ai_module/models/cylinder_detector_int8_edgetpu.tflite")
@@ -216,43 +207,7 @@ def main():
         print("FAILURE no_detection", flush=True)
         return
 
-    if hint is None:
-        # INIT: no prior position — pick the cylinder closest to the image
-        # center. The robot is positioned so the target should be near the
-        # center of the field of view; this is more stable than highest
-        # confidence when multiple cylinders are present.
-        img_h, img_w = img_bgr.shape[:2]
-        cx, cy = img_w / 2.0, img_h / 2.0
-        def dist_to_center(item):
-            b, _ = item
-            bx = (b[0] + b[2]) / 2.0
-            by = (b[1] + b[3]) / 2.0
-            return (bx - cx) ** 2 + (by - cy) ** 2
-        best_box, best_score = min(candidates, key=dist_to_center)
-        print(f"[AI] INIT selection: closest to image center ({cx:.0f}, {cy:.0f})", file=sys.stderr)
-    else:
-        # JOINT: pick the detection closest to the last known position,
-        # so the robot keeps tracking the same cylinder despite score fluctuations
-        ref_u, ref_v = hint
-        def dist_to_hint(item):
-            b, _ = item
-            bx = (b[0] + b[2]) / 2.0
-            by = (b[1] + b[3]) / 2.0
-            return (bx - ref_u) ** 2 + (by - ref_v) ** 2
-        best_box, best_score = min(candidates, key=dist_to_hint)
-
-        # Reject if the closest candidate is still too far from the hint.
-        # This happens when the target cylinder drops below the confidence
-        # threshold and only a different cylinder remains in candidates.
-        # Returning FAILURE lets C++ hold the last valid ai_hint position.
-        x1c, y1c, x2c, y2c = best_box
-        jump = ((x1c + x2c) / 2.0 - ref_u) ** 2 + ((y1c + y2c) / 2.0 - ref_v) ** 2
-        jump = jump ** 0.5
-        if jump > max_jump:
-            print(f"FAILURE jump_rejected:{jump:.1f}px_exceeds_{max_jump}px", flush=True)
-            return
-        print(f"[AI] JOINT selection: closest to hint ({ref_u:.1f}, {ref_v:.1f}), dist={jump:.1f}px", file=sys.stderr)
-
+    best_box, best_score = max(candidates, key=lambda x: x[1])
     x1, y1, x2, y2 = best_box
     width = x2 - x1
     height = y2 - y1
