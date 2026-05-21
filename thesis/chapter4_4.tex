@@ -1,0 +1,615 @@
+%%=============================================================
+%% chapter4_4.tex
+%% Phần 4.4 — AI #3: Phát hiện vật thể cho pick & place
+%%
+%% Đây là \input file — thêm vào preamble của main.tex:
+%%   \usepackage{tikz}
+%%   \usetikzlibrary{shapes.geometric,arrows.meta,positioning,
+%%     fit,backgrounds,calc,decorations.pathreplacing}
+%%   \usepackage{pgfplots}
+%%   \pgfplotsset{compat=1.18}
+%%   \usepackage{listings,xcolor,booktabs,multirow,subcaption}
+%%=============================================================
+
+\definecolor{cppblue}{RGB}{30,100,200}
+\definecolor{pygreen}{RGB}{40,150,80}
+\definecolor{warnred}{RGB}{200,60,60}
+\definecolor{orng}{RGB}{220,130,30}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{cppblue},
+  commentstyle=\color{gray!70},
+  stringstyle=\color{orng},
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  framexleftmargin=4pt,
+  xleftmargin=8pt,
+  numbers=none,
+}
+
+% ================================================================
+\section{AI \#3 --- Tự động hoá khâu khởi tạo trong hệ thống pick \& place}
+\label{sec:ai3}
+% ================================================================
+
+% ----------------------------------------------------------------
+\subsection{Bối cảnh: vấn đề của hệ thống visual servoing ban đầu}
+\label{subsec:ai3-context}
+% ----------------------------------------------------------------
+
+Hệ thống pick \& place chạy trên cánh tay robot Denso VS-6577E 6 bậc tự do,
+sử dụng thư viện ViSP (Visual Servoing Platform) để điều khiển bằng thị giác.
+Camera USB được gắn trực tiếp lên đầu công tác theo cấu hình \textit{eye-in-hand} ---
+camera di chuyển cùng robot và nhìn thẳng về phía vật thể cần gắp trong suốt
+quá trình tiếp cận.
+
+Vấn đề cốt lõi của hệ thống ban đầu nằm ở bước khởi tạo: sau khi robot về
+home pose cố định, \textbf{người vận hành phải click chuột vào vị trí cylinder}
+trên cửa sổ hiển thị camera thì blob tracker (\texttt{vpDot2}) mới bắt đầu
+hoạt động được. Visual servo chỉ chạy sau thao tác thủ công đó. Ngoài ra,
+nếu tracker mất target trong lúc servo --- điều hoàn toàn có thể xảy ra khi
+cylinder bị che khuất hoặc di chuyển ra ngoài vùng sáng --- hệ thống reset
+hoàn toàn và lại đòi hỏi click thủ công ở lần tiếp theo. Mỗi chu kỳ
+pick \& place đều cần sự can thiệp của người vận hành, loại bỏ khả năng
+vận hành tự động không giám sát.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.8cm and 0.6cm,
+    bx/.style={draw, rounded corners=4pt, text width=3.0cm, align=center,
+               minimum height=0.9cm, font=\small},
+    robot/.style={bx, draw=cppblue!70, fill=cppblue!8},
+    manual/.style={bx, draw=warnred!70, fill=warnred!8},
+    aibox/.style={bx, draw=pygreen!70, fill=pygreen!8},
+    arr/.style={->, >=Stealth, thick},
+    rarr/.style={arr, draw=warnred!70},
+    garr/.style={arr, draw=pygreen!70},
+  ]
+
+  %% --- CỘT TRÁI: hệ thống gốc ---
+  \node[robot]                    (L1) {PREINIT\\{\scriptsize robot $\to$ home pose}};
+  \node[manual, below=of L1]      (L2) {Click thủ công\\{\scriptsize chọn cylinder}};
+  \node[robot,  below=of L2]      (L3) {JOINT\\{\scriptsize vpDot2 tracking}};
+  \node[manual, below=of L3]      (L4) {Mất tracking\\{\scriptsize $\to$ reset toàn bộ}};
+
+  \draw[arr]  (L1) -- (L2);
+  \draw[arr]  (L2) -- (L3);
+  \draw[rarr] (L3) -- (L4);
+  \draw[rarr, dashed] (L4.west)
+        to[out=190,in=170,looseness=1.3] (L1.west)
+        node[midway, left, font=\scriptsize, text=warnred!70] {reset};
+
+  \node[font=\bfseries\small, text=warnred, above=0.5cm of L1]
+       {\textit{Trước cải tiến}};
+
+  %% --- CỘT PHẢI: hệ thống mới ---
+  \node[robot,  right=3.8cm of L1] (R1) {PREINIT\\{\scriptsize robot $\to$ home pose}};
+  \node[aibox, below=of R1]        (R2) {AI detect\\{\scriptsize EfficientDet-Lite0}};
+  \node[robot,  below=of R2]       (R3) {JOINT\\{\scriptsize AI tracking mỗi frame}};
+  \node[aibox, below=of R3]        (R4) {AI re-detect\\{\scriptsize tự phục hồi}};
+
+  \draw[arr]  (R1) -- (R2);
+  \draw[garr] (R2) -- (R3);
+  \draw[garr] (R3) -- (R4);
+  \draw[garr, dashed] (R4.east)
+        to[out=0,in=0,looseness=1.5] (R3.east)
+        node[midway, right, font=\scriptsize, text=pygreen!70] {tiếp tục};
+
+  %% fallback arrow từ AI detect
+  \node[manual, right=1.2cm of R3] (FB)
+       {{\scriptsize fallback:}\\click thủ công};
+  \draw[rarr, dashed] (R2.east) -| (FB.north)
+        node[near start, above, font=\scriptsize, text=warnred] {AI fail};
+
+  \node[font=\bfseries\small, text=pygreen!80!black, above=0.5cm of R1]
+       {\textit{Sau cải tiến}};
+
+  %% Đường phân cách
+  \draw[thick, dashed, gray!50]
+      ($(L1.east)!0.5!(R1.west)+(0,0.8)$) -- ++(0,-6.5);
+
+  \end{tikzpicture}
+  \caption{So sánh luồng vận hành trước và sau khi tích hợp module AI.
+           Bước yêu cầu thao tác thủ công (đỏ) được thay thế bằng AI tự động (xanh lá).
+           Fallback về click thủ công vẫn được giữ lại cho trường hợp AI thất bại.}
+  \label{fig:ai3-before-after}
+\end{figure}
+
+Hình~\ref{fig:ai3-before-after} minh hoạ sự thay đổi này. Module AI đảm nhiệm
+toàn bộ việc phát hiện cylinder ở bước khởi tạo và tự phục hồi khi mất target
+trong quá trình servo. Hệ thống vẫn giữ nguyên fallback về click thủ công để
+đảm bảo tương thích ngược.
+
+
+% ----------------------------------------------------------------
+\subsection{Xây dựng và huấn luyện mô hình EfficientDet-Lite0}
+\label{subsec:ai3-model}
+% ----------------------------------------------------------------
+
+\subsubsection*{Lựa chọn kiến trúc}
+
+Yêu cầu đặt ra khá cụ thể: mô hình phải đủ nhỏ để triển khai được trên
+Google Coral EdgeTPU, phải hỗ trợ INT8 quantization, và tương thích với
+\texttt{tflite\_model\_maker} --- framework đã có sẵn trong môi trường phát triển.
+\textbf{EfficientDet-Lite0} đáp ứng tất cả: đây là biến thể nhỏ nhất trong
+họ EfficientDet được Google tối ưu cho thiết bị edge, input cố định
+$320 \times 320$ pixel, backbone là EfficientNet-B0 đã được simplify.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Thông số mô hình EfficientDet-Lite0}
+  \label{tab:ai3-model}
+  \small
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Thuộc tính}       & \textbf{Giá trị} \\
+    \midrule
+    Kiến trúc                 & EfficientDet-Lite0 \\
+    Framework training        & TensorFlow~2.8.4 / \texttt{tflite\_model\_maker}~0.4.3 \\
+    Input size                & $320 \times 320$~px, uint8 \\
+    Số lớp đối tượng          & 2 (cylinder~--~lớp~0, cube~--~lớp~1) \\
+    Số epochs / batch size    & 50 / 8 \\
+    Transfer learning         & Frozen backbone, fine-tune detection head \\
+    Target hardware           & Google Coral USB Accelerator (EdgeTPU) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Mô hình được huấn luyện để phát hiện \textbf{hai lớp}: cylinder và cube nhựa PLA
+in 3D. Việc đưa thêm cube vào tập huấn luyện là có chủ ý --- giúp mô hình học
+cách phân biệt hai loại vật thể, từ đó giảm false positive khi cả hai cùng
+xuất hiện trong cảnh. Ở phía tích hợp với ViSP, chỉ kết quả cylinder
+(\texttt{class\_id~==~0}) được dùng; dự đoán cube bị lọc bỏ.
+
+\subsubsection*{Tập dữ liệu}
+
+Toàn bộ ảnh được thu trực tiếp từ camera eye-in-hand gắn trên robot Denso,
+đảm bảo điều kiện thực tế sát với lúc triển khai. Ảnh bao gồm nhiều cấu hình:
+góc chụp khác nhau, khoảng cách thay đổi, và số lượng vật thể từ 1 đến 5 trong
+một cảnh.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      xbar, bar width=0.42cm,
+      xlabel={Số lượng ảnh (xấp xỉ)},
+      ylabel={Danh mục},
+      symbolic y coords={
+        Background,
+        2 cube + 3 cyl,
+        2 cylinders,
+        3 cylinders,
+        1 cyl + 1 cube,
+        1 cube,
+        1 cylinder,
+        Cylinder (gốc)
+      },
+      ytick=data,
+      xmin=0, xmax=175,
+      width=9.5cm, height=6.8cm,
+      nodes near coords,
+      nodes near coords align={horizontal},
+      every node near coord/.style={font=\scriptsize},
+      tick label style={font=\small},
+      xlabel style={font=\small},
+      ylabel style={font=\small},
+      enlarge y limits=0.08,
+    ]
+    \addplot[fill=cppblue!55, draw=cppblue!80] coordinates {
+      (38,  Background)
+      (28,  2 cube + 3 cyl)
+      (52,  2 cylinders)
+      (43,  3 cylinders)
+      (68,  1 cyl + 1 cube)
+      (38,  1 cube)
+      (108, 1 cylinder)
+      (144, Cylinder (gốc))
+    };
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Phân bố tập dữ liệu theo danh mục ảnh (~534 ảnh tổng,
+           633 annotation cylinder, 170 annotation cube).
+           Các cảnh đa vật thể giúp mô hình học phát hiện từng đối tượng
+           riêng lẻ trong môi trường phức tạp.}
+  \label{fig:ai3-dataset}
+\end{figure}
+
+Annotation được thực hiện bằng \texttt{labelme} theo format bounding box hình chữ
+nhật. Workflow:
+\begin{enumerate}
+  \item Vẽ bounding box cho từng cylinder và cube bằng \texttt{labelme}
+  \item Chuyển đổi labelme JSON $\to$ COCO JSON thống nhất
+        (script \texttt{labelme\_to\_coco.py})
+  \item Tập dữ liệu được split theo tỉ lệ $70/15/15$ (train/val/test),
+        seed cố định để đảm bảo tính tái lập
+\end{enumerate}
+
+Phân chia ba chiều thay vì hai chiều đảm bảo tập test hoàn toàn độc lập ---
+không được nhìn thấy trong suốt quá trình training hoặc điều chỉnh siêu tham số.
+
+\subsubsection*{Pipeline huấn luyện}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.45cm and 0.15cm,
+    st/.style={draw, rounded corners=3pt, fill=gray!10, draw=gray!55,
+               text width=2.0cm, align=center, minimum height=0.85cm, font=\small},
+    blue_st/.style={st, fill=cppblue!10, draw=cppblue!55},
+    out_st/.style={st, fill=orng!20, draw=orng!70},
+    arr/.style={->, >=Stealth, thick, gray!60},
+    lbl/.style={font=\scriptsize, text=gray!80},
+  ]
+
+  \node[blue_st] (s1) {Annotation\\{\scriptsize labelme}};
+  \node[blue_st, right=of s1] (s2) {COCO\\JSON};
+  \node[blue_st, right=of s2] (s3) {Pascal\\VOC XML};
+  \node[blue_st, right=of s3] (s4) {Training\\{\scriptsize 50 epochs}};
+  \node[out_st, right=of s4] (s5) {SavedModel\\{\scriptsize Float32}};
+  \node[out_st, below=0.55cm of s5] (s6) {INT8\\TFLite};
+  \node[out_st, below=0.55cm of s6] (s7) {EdgeTPU\\TFLite};
+
+  \draw[arr] (s1) -- (s2) node[lbl,above,midway] {to\_coco.py};
+  \draw[arr] (s2) -- (s3) node[lbl,above,midway] {tflite\_mm};
+  \draw[arr] (s3) -- (s4);
+  \draw[arr] (s4) -- (s5) node[lbl,above,midway] {export};
+  \draw[arr] (s5) -- (s6) node[lbl,right,midway] {PTQ};
+  \draw[arr] (s6) -- (s7) node[lbl,right,midway] {edgetpu\_compiler};
+
+  \end{tikzpicture}
+  \caption{Pipeline huấn luyện và xuất mô hình. Từ ảnh thô đến ba file
+           mô hình phục vụ các môi trường triển khai khác nhau.
+           Bước chuyển đổi sang Pascal VOC XML là yêu cầu bắt buộc của
+           \texttt{tflite\_model\_maker}.}
+  \label{fig:ai3-pipeline}
+\end{figure}
+
+Transfer learning với \texttt{train\_whole\_model=False} --- chỉ fine-tune detection
+head, giữ nguyên backbone đã pretrain --- phù hợp với tập dữ liệu tương đối nhỏ
+($\sim$374 ảnh train) và giảm nguy cơ overfitting đáng kể so với
+huấn luyện từ đầu.
+
+
+% ----------------------------------------------------------------
+\subsection{Quantization INT8 và biên dịch cho EdgeTPU}
+\label{subsec:ai3-quant}
+% ----------------------------------------------------------------
+
+Mô hình sau training là Float32 --- không chạy được trực tiếp trên Coral EdgeTPU.
+EdgeTPU chỉ thực thi mô hình INT8 quantized, trong đó trọng số và activation
+được biểu diễn bằng số nguyên 8-bit. Lợi ích: kích thước giảm $\sim4\times$,
+và phần cứng EdgeTPU đạt tốc độ inference cực nhanh ($\sim$4--15~ms/frame)
+nhờ tận dụng phép tính số nguyên.
+
+Post-Training Quantization (PTQ) sử dụng tập train làm \textit{representative
+dataset} để calibrate scale và zero\_point cho từng layer --- đây là bước bắt
+buộc để duy trì độ chính xác của INT8 model gần với Float32 baseline.
+
+File \texttt{\_edgetpu.tflite} sau khi biên dịch chứa custom op
+\texttt{edgetpu-custom-op} mà TFLite runtime thông thường
+\textit{không thể thực thi trên CPU}, gây lỗi:
+
+\begin{lstlisting}[language={}]
+RuntimeError: Encountered unresolved custom op: edgetpu-custom-op
+\end{lstlisting}
+
+Do đó hệ thống \textbf{duy trì hai file riêng biệt} và lựa chọn tự động:
+
+\begin{center}
+\small
+\begin{tabular}{lll}
+  \toprule
+  File & Runtime & Deployment \\
+  \midrule
+  \texttt{cylinder\_detector\_int8\_edgetpu.tflite} & pycoral   & Coral EdgeTPU \\
+  \texttt{cylinder\_detector\_int8.tflite}          & TFLite/ai-edge-litert & CPU \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+
+% ----------------------------------------------------------------
+\subsection{Kiến trúc tích hợp: C++ ViSP ↔ Python subprocess}
+\label{subsec:ai3-arch}
+% ----------------------------------------------------------------
+
+\subsubsection*{Quyết định thiết kế}
+
+Thay vì link trực tiếp thư viện TFLite C++ vào build system của ViSP
+(đòi hỏi thay đổi lớn vào CMakeLists và phụ thuộc version build cụ thể),
+hệ thống áp dụng kiến trúc \textbf{subprocess model}: C++ gọi Python script
+như một tiến trình con qua \texttt{popen()}, giao tiếp một chiều qua stdout.
+Cách này giúp module AI hoàn toàn tách biệt --- cập nhật mô hình không cần
+recompile code robot.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.38cm and 0.5cm,
+    comp/.style={draw, rounded corners=4pt, text width=3.1cm, align=center,
+                 minimum height=0.82cm, font=\small},
+    cpp/.style={comp, fill=cppblue!10, draw=cppblue!55},
+    py/.style={comp,  fill=pygreen!10, draw=pygreen!60},
+    tmp/.style={comp,  fill=orng!18, draw=orng!65, text width=2.5cm,
+                minimum height=0.7cm, font=\scriptsize},
+    arr/.style={->, >=Stealth, thick},
+    ]
+
+  %% ---- C++ side ----
+  \node[cpp] (cap)   {Camera capture\\{\scriptsize vpImage{$<$}uchar{$>$}}};
+  \node[cpp, below=of cap]  (save)  {Save frame\\{\scriptsize cv::imwrite()}};
+  \node[cpp, below=of save] (pop)   {popen() subprocess\\{\scriptsize build cmd}};
+  \node[cpp, below=of pop]  (sel)   {select() timeout 3s\\{\scriptsize POSIX wait}};
+  \node[cpp, below=of sel]  (parse) {Parse stdout\\{\scriptsize sscanf SUCCESS}};
+  \node[cpp, below=of parse](feat)  {vpFeatureBuilder\\{\scriptsize create feature}};
+
+  \draw[arr](cap)--(save); \draw[arr](save)--(pop);
+  \draw[arr](pop)--(sel);  \draw[arr](sel)--(parse); \draw[arr](parse)--(feat);
+
+  \node[draw=cppblue!50, dashed, rounded corners=6pt,
+        fit=(cap)(save)(pop)(sel)(parse)(feat),
+        inner sep=7pt] (cbox) {};
+  \node[above=2pt of cbox, font=\bfseries\small, text=cppblue]
+       {C++ (ViSP main loop)};
+
+  %% ---- Temp file ----
+  \node[tmp, right=2.6cm of save] (jpg)
+       {/tmp/visp\_ai\_frame.jpg};
+
+  %% ---- Python side ----
+  \node[py, right=2.6cm of pop]   (load) {Load model\\{\scriptsize fallback chain}};
+  \node[py, below=of load]        (pre)  {Preprocess\\{\scriptsize resize 320$\times$320}};
+  \node[py, below=of pre]         (inf)  {Inference\\{\scriptsize invoke()}};
+  \node[py, below=of inf]         (post) {Post-process\\{\scriptsize dequant+filter}};
+  \node[py, below=of post]        (out)  {Print stdout\\{\scriptsize SUCCESS u v conf}};
+
+  \draw[arr](load)--(pre); \draw[arr](pre)--(inf);
+  \draw[arr](inf)--(post); \draw[arr](post)--(out);
+
+  \node[draw=pygreen!55, dashed, rounded corners=6pt,
+        fit=(load)(pre)(inf)(post)(out),
+        inner sep=7pt] (pbox) {};
+  \node[above=2pt of pbox, font=\bfseries\small, text=pygreen!80!black]
+       {Python subprocess};
+
+  %% ---- Data flow arrows ----
+  \draw[arr, orng!80]  (save.east) -- (jpg.west)  node[midway,above,font=\scriptsize]{write};
+  \draw[arr, orng!80]  (jpg.east)  -- (load.west) node[midway,above,font=\scriptsize]{read};
+  \draw[arr, cppblue!60](pop.east)  -- (load.west) node[midway,above,font=\scriptsize,yshift=2pt]{spawn};
+  \draw[arr, pygreen!70, bend right=25](out.west)  to (parse.east)
+        node[midway,below,font=\scriptsize]{stdout pipe};
+
+  \end{tikzpicture}
+  \caption{Kiến trúc tích hợp C++ ViSP $\leftrightarrow$ Python subprocess.
+           C++ lưu frame hiện tại ra file tạm, spawn Python làm child process
+           qua \texttt{popen()}, đọc kết quả từ stdout sau khi qua timeout guard.}
+  \label{fig:ai3-arch}
+\end{figure}
+
+\subsubsection*{Protocol trao đổi dữ liệu}
+
+Output của Python script là một dòng duy nhất trên stdout:
+
+\begin{lstlisting}[language={}]
+SUCCESS 272.86 190.74 0.8362 238.42 166.89 68.88 47.68
+%        u      v      conf   x_min  y_min  width  height
+\end{lstlisting}
+
+hoặc \texttt{FAILURE~<lý~do>} nếu không phát hiện được. Tất cả debug log
+đi ra \texttt{stderr} --- C++ chỉ đọc stdout --- tránh nhiễu kết quả parse.
+
+Đáng chú ý: trong ViSP, \texttt{vpImagePoint} được định nghĩa là \texttt{(row,~col)}
+tương ứng \texttt{(v,~u)}, không phải \texttt{(u,~v)} như thông thường:
+
+\begin{lstlisting}[language=C++]
+detected_center = vpImagePoint(v, u);  // row=v, col=u
+\end{lstlisting}
+
+Tham số \texttt{hint} cho phép Python chọn cylinder \textit{gần nhất với vị
+trí đã biết} thay vì cylinder có confidence cao nhất --- cơ chế này tránh
+hiện tượng servo ``nhảy'' sang cylinder khác khi scores thay đổi giữa các frame.
+
+
+% ----------------------------------------------------------------
+\subsection{State machine: PREINIT \texorpdfstring{$\to$}{→} INIT (AI) \texorpdfstring{$\to$}{→} JOINT \texorpdfstring{$\to$}{→} ...}
+\label{subsec:ai3-sm}
+% ----------------------------------------------------------------
+
+Hệ thống vận hành theo vòng lặp chính liên tục với 6 trạng thái.
+Mỗi iteration đọc một frame camera và thực thi logic trạng thái hiện tại.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    node distance=1.0cm and 2.0cm,
+    st/.style={draw, rounded corners=4pt, fill=cppblue!10, draw=cppblue!55,
+               text width=2.3cm, align=center, minimum height=1.0cm, font=\small},
+    ai/.style={st, fill=pygreen!10, draw=pygreen!60},
+    arr/.style={->, >=Stealth, thick},
+    lbl/.style={font=\scriptsize, text=gray!70},
+  ]
+
+  %% Top row
+  \node[st]  (pre)  {PREINIT\\{\scriptsize home pose}};
+  \node[ai,  right=of pre]   (ini)  {INIT\\{\scriptsize AI detect}};
+  \node[ai,  right=of ini]   (jnt)  {JOINT\\{\scriptsize AI tracking}};
+  \node[st,  right=of jnt]   (app)  {APPROACH\\{\scriptsize chờ RC5}};
+
+  %% Bottom row
+  \node[st,  below=1.8cm of app]  (grp)  {GRIPPER\\{\scriptsize đóng gripper}};
+  \node[st,  left=of grp]         (cls)  {CLASSIFIED\\{\scriptsize vận chuyển}};
+
+  %% Arrows
+  \draw[arr](pre)--(ini)  node[lbl,above,midway]{home\\reached};
+  \draw[arr](ini)--(jnt)  node[lbl,above,midway]{AI init\\ok};
+  \draw[arr](jnt)--(app)  node[lbl,above,midway]{$|e|<5{\times}10^{-3}$};
+  \draw[arr](app)--(grp)  node[lbl,right,midway]{RC5\\signal};
+  \draw[arr](grp)--(cls)  node[lbl,below,midway]{grasped};
+  \draw[arr](cls.west) to[out=180,in=270,looseness=0.8] (pre.south)
+        node[lbl,left,pos=0.5]{cycle\\restart};
+
+  %% AI self-recovery
+  \draw[arr, pygreen!70, dashed]
+        (jnt.north) to[out=100,in=80,looseness=2.5] (jnt.north)
+        node[above=0.7cm of jnt, font=\scriptsize, text=pygreen!80!black]
+        {AI re-detect};
+
+  %% Fallback from INIT
+  \draw[arr, warnred!70, dashed]
+        (ini.south) -- ++(0,-0.7)
+        node[below, font=\scriptsize, text=warnred]
+        {fallback: click thủ công};
+
+  \end{tikzpicture}
+  \caption{State machine của hệ thống pick \& place sau cải tiến.
+           Trạng thái tô xanh lá là nơi AI được gọi.
+           Vòng lặp tự phục hồi ở JOINT (mũi tên đứt nét) cho phép hệ thống
+           tiếp tục mà không cần reset khi mất detection.}
+  \label{fig:ai3-sm}
+\end{figure}
+
+\paragraph{PREINIT.}
+Robot gửi lệnh joint position về home pose
+$[0^\circ, 0^\circ, 90^\circ, 0^\circ, 90^\circ, 0^\circ]$.
+Servo task được cấu hình với interaction matrix Desired, pseudo-inverse,
+gain $\lambda = 0.4$.
+
+\paragraph{INIT.}
+Chờ robot đạt home pose (sai số từng joint $< 0.01$) và gripper mở xong.
+Khi cả hai điều kiện thỏa, \texttt{detectCylinderWithAI()} được gọi
+không có hint --- Python chọn cylinder có confidence cao nhất.
+Kết quả trực tiếp tạo visual feature \texttt{vpFeaturePoint}
+và add vào servo task. Nếu AI thất bại, \texttt{ai\_hint}
+giữ giá trị mặc định (fallback thủ công).
+
+\paragraph{JOINT.}
+Khác với cách tiếp cận truyền thống dùng blob tracker mỗi frame,
+hệ thống hiện tại \textbf{gọi AI trực tiếp ở mỗi iteration}
+với \texttt{hint = \&ai\_hint}. Control law:
+\begin{equation}
+  \mathbf{v} = -\lambda\,\mathbf{L}_{s^*}^{+}\,\mathbf{e},
+  \qquad \mathbf{q}_{k+1} = \mathbf{q}_k + \mathbf{v}\,\Delta t
+  \label{eq:ibvs}
+\end{equation}
+với $\Delta t = 0.5\,$s. Điều kiện hội tụ: $|e_x| < 5{\times}10^{-3}$
+và $|e_y| < 5{\times}10^{-3}$ (normalized image coordinates).
+Khi đạt, gửi \texttt{"OKE\textbackslash r"} qua UART đến RC5 controller.
+
+
+% ----------------------------------------------------------------
+\subsection{Các vấn đề kỹ thuật và giải pháp}
+\label{subsec:ai3-issues}
+% ----------------------------------------------------------------
+
+Một số vấn đề nảy sinh trong quá trình tích hợp mà khó thấy trước khi thực
+sự chạy hệ thống.
+
+\subsubsection*{P1: Xác định output tensor sai lệch}
+
+\texttt{tflite\_model\_maker} 0.4.x đặt tên tensor theo thứ tự riêng của nó:
+
+\begin{center}
+\small
+\begin{tabular}{ccc}
+  \toprule
+  Tensor & Shape & Nội dung \\
+  \midrule
+  \texttt{:0} & \texttt{[1]}     & num\_detections \\
+  \texttt{:1} & \texttt{[1,\,N]} & scores \quad \textbf{← cần lấy cái này} \\
+  \texttt{:2} & \texttt{[1,\,N]} & class IDs \quad \textbf{← không phải cái này} \\
+  \texttt{:3} & \texttt{[1,\,N,\,4]} & boxes \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Thứ tự này không khớp với API của pycoral, vốn giả định positional order
+\texttt{boxes/classes/scores/count = 0/1/2/3}. Dùng API đó sẽ đọc
+num\_detections (raw uint8 = 255) như scores và crash với \texttt{IndexError}.
+Giải pháp: xác định tensor \textbf{theo shape động} --- boxes là
+\texttt{[1,N,4]}, scores là tensor \texttt{[1,N]} có name suffix nhỏ nhất
+(\texttt{:1} chứ không phải \texttt{:2}).
+
+\subsubsection*{P2: Python 3.10 không có \texttt{tflite-runtime}}
+
+Google không publish wheel \texttt{tflite-runtime} cho Python 3.10+.
+Giải pháp là xây dựng \textbf{fallback chain 4 tầng}:
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    node distance=0.4cm,
+    fb/.style={draw, rounded corners=3pt, text width=7.5cm, align=left,
+               minimum height=0.85cm, font=\small, inner sep=7pt},
+    t1/.style={fb, fill=purple!12, draw=purple!55},
+    t2/.style={fb, fill=teal!10,   draw=teal!50},
+    t3/.style={fb, fill=cppblue!10, draw=cppblue!50},
+    t4/.style={fb, fill=gray!12,   draw=gray!50},
+    fa/.style={fb, fill=warnred!10, draw=warnred!50},
+    arr/.style={->, >=Stealth, thick, dashed, gray!55},
+    lbl/.style={font=\scriptsize, text=warnred!80},
+  ]
+  \node[t1] (a) {\textbf{1.}~\texttt{pycoral.utils.edgetpu}\quad{\scriptsize Coral EdgeTPU, Python 3.9}};
+  \node[t2, below=of a] (b) {\textbf{2.}~\texttt{ai\_edge\_litert.interpreter}\quad{\scriptsize Google's new pkg, Python 3.8--3.12}};
+  \node[t3, below=of b] (c) {\textbf{3.}~\texttt{tflite\_runtime.interpreter}\quad{\scriptsize Legacy, Python 3.9}};
+  \node[t4, below=of c] (d) {\textbf{4.}~\texttt{tensorflow.lite.Interpreter}\quad{\scriptsize Heavy fallback}};
+  \node[fa, below=of d] (e) {\textbf{FAILURE}:~\texttt{no\_tflite\_backend\_available}};
+
+  \draw[arr](a)--(b) node[lbl,right,midway]{ImportError / Coral not connected};
+  \draw[arr](b)--(c) node[lbl,right,midway]{ImportError};
+  \draw[arr](c)--(d) node[lbl,right,midway]{ImportError};
+  \draw[arr](d)--(e) node[lbl,right,midway]{ImportError};
+  \end{tikzpicture}
+  \caption{Python backend fallback chain trong \texttt{detect\_cylinder.py}.
+           Script tự động thử từng backend theo thứ tự ưu tiên,
+           tương thích với cả môi trường có Coral lẫn CPU-only.}
+  \label{fig:ai3-fallback}
+\end{figure}
+
+\texttt{ai-edge-litert} là gói chính thức của Google thay thế \texttt{tflite-runtime},
+hỗ trợ Python 3.8--3.12 với API giống hệt nhau --- là giải pháp cho vấn đề Python 3.10.
+
+\subsubsection*{P3: JSON comment trong config}
+
+\texttt{config.json} dùng comment \texttt{//} để ghi chú, nhưng cả Python
+\texttt{json.load()} và \texttt{nlohmann::json} đều từ chối mặc định.
+Phía C++: \texttt{nlohmann::json::parse(file, nullptr, true, true)} với
+\texttt{ignore\_comments=true} (có từ nlohmann/json~3.9.0).
+Phía Python: strip comment lines thủ công trước khi \texttt{json.loads()}.
+
+
+% ----------------------------------------------------------------
+\subsection{Thông số cấu hình visual servo}
+\label{subsec:ai3-servo}
+% ----------------------------------------------------------------
+
+Hệ thống sử dụng \textbf{Image-Based Visual Servoing (IBVS)} với feature là
+tọa độ 2D của cylinder trong không gian ảnh normalized $\mathbf{s}=(x,y)$,
+desired position $\mathbf{s}^*=(0,0,1)$ --- cylinder phải nằm đúng tâm ảnh.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Thông số điều khiển visual servo}
+  \label{tab:ai3-servo}
+  \small
+  \begin{tabular}{ll}
+    \toprule
+    \textbf{Tham số}            & \textbf{Giá trị} \\
+    \midrule
+    Loại điều khiển             & Eye-in-hand, \texttt{EYEINHAND\_L\_cVe\_eJe} \\
+    Interaction matrix          & Desired ($\mathbf{L}_{s^*}$), pseudo-inverse \\
+    Gain $\lambda$              & 0.4 \\
+    Bước thời gian $\Delta t$   & 0.5\,s \\
+    Ngưỡng hội tụ               & $|e_x| < 5{\times}10^{-3}$ và $|e_y| < 5{\times}10^{-3}$ \\
+    Desired position            & $(x^*, y^*) = (0,\,0)$ --- tâm ảnh, $Z = 1$ \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Dùng $\mathbf{L}_{s^*}$ (tại vị trí mong muốn) thay vì $\mathbf{L}_{s_{cur}}$
+giúp tránh singularity khi feature tiến gần desired point và giữ ổn định
+theo ổn định hơn trong giai đoạn hội tụ. Velocity được saturate trước khi
+gửi xuống robot để đảm bảo không vượt giới hạn vật lý từng khớp.
