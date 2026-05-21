@@ -1,0 +1,394 @@
+%%=============================================================
+%% chapter5_4.tex
+%% Phần 5.4 — Kết quả đánh giá: AI #3 Phát hiện vật thể
+%%
+%% \input file — cần thêm vào preamble:
+%%   \usepackage{tikz}
+%%   \usetikzlibrary{arrows.meta,positioning,patterns}
+%%   \usepackage{pgfplots}
+%%   \pgfplotsset{compat=1.18}
+%%   \usepackage{booktabs,multirow,subcaption,xcolor}
+%%=============================================================
+
+% ================================================================
+\section{Kết quả và Đánh giá: AI \#3 --- Phát hiện vật thể}
+\label{sec:ai3-results}
+% ================================================================
+
+% ----------------------------------------------------------------
+\subsection{Kết quả detection model: COCO metrics}
+\label{subsec:ai3-coco}
+% ----------------------------------------------------------------
+
+Mô hình được đánh giá trên cả validation set và test set độc lập
+theo chuẩn \textbf{COCO evaluation protocol} --- tính trung bình mAP qua
+các ngưỡng IoU từ 0.50 đến 0.95 với bước 0.05.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      ybar, bar width=0.45cm,
+      width=10cm, height=7cm,
+      symbolic x coords={mAP (0.50:0.95), AP50, AP75, AR},
+      xtick=data,
+      x tick label style={font=\small, align=center},
+      ymin=0, ymax=1.15,
+      ylabel={Score},
+      ylabel style={font=\small},
+      legend style={at={(0.5,1.03)}, anchor=south, legend columns=2, font=\small},
+      legend cell align=left,
+      nodes near coords,
+      every node near coord/.style={font=\scriptsize, /pgf/number format/fixed,
+                                    /pgf/number format/precision=3},
+      enlarge x limits=0.25,
+      grid=major, grid style={dashed, gray!30},
+      axis line style={gray!60},
+      tick style={gray!60},
+    ]
+    \addplot[fill=cppblue!70, draw=cppblue!90] coordinates {
+      (mAP (0.50:0.95), 0.791)
+      (AP50, 0.990)
+      (AP75, 0.990)
+      (AR,   0.869)
+    };
+    \addplot[fill=orng!80, draw=orng!90] coordinates {
+      (mAP (0.50:0.95), 0.799)
+      (AP50, 1.000)
+      (AP75, 0.969)
+      (AR,   0.856)
+    };
+    \legend{Validation, Test}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{COCO metrics trên validation set và test set. AP50 trên test set
+           đạt 1.000 cho thấy 100\% cylinder được phát hiện đúng ở ngưỡng IoU
+           lỏng lẻ (50\%). mAP$\approx$0.80 phản ánh vẫn còn đây đó những trường hợp
+           định vị bounding box chưa được chính xác ở ngưỡng IoU cao.}
+  \label{fig:ai3-coco}
+\end{figure}
+
+Bảng~\ref{tab:ai3-metrics} tổng hợp số liệu chi tiết:
+
+\begin{table}[htbp]
+  \centering
+  \caption{COCO metrics trên validation và test set}
+  \label{tab:ai3-metrics}
+  \small
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Metric}                    & \textbf{Validation} & \textbf{Test} \\
+    \midrule
+    mAP (IoU 0.50:0.95)               & 0.791               & \textbf{0.799} \\
+    AP50 (IoU $\geq$ 0.50)            & 0.990               & \textbf{1.000} \\
+    AP75 (IoU $\geq$ 0.75)            & 0.990               & 0.969 \\
+    AR (maxDets=100)                   & 0.869               & 0.856 \\
+    \midrule
+    Precision (IoU=0.50, conf=0.50)    & ---                 & \textbf{1.000} \\
+    Recall    (IoU=0.50, conf=0.50)    & ---                 & 0.990 \\
+    F1-Score                           & ---                 & \textbf{0.995} \\
+    TP / FP / FN                       & ---                 & 95 / 0 / 1 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      ybar, bar width=0.55cm,
+      width=8.5cm, height=6cm,
+      symbolic x coords={Precision, Recall, F1-Score},
+      xtick=data,
+      x tick label style={font=\small},
+      ymin=0.96, ymax=1.04,
+      ylabel={Score},
+      ylabel style={font=\small},
+      nodes near coords,
+      every node near coord/.style={font=\small, /pgf/number format/fixed,
+                                    /pgf/number format/precision=3},
+      enlarge x limits=0.3,
+      grid=major, grid style={dashed, gray!30},
+      axis line style={gray!60},
+    ]
+    \addplot[fill=pygreen!65, draw=pygreen!80] coordinates {
+      (Precision, 1.000)
+      (Recall,    0.990)
+      (F1-Score,  0.995)
+    };
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Precision, Recall và F1-Score trên test set (PASCAL VOC protocol,
+           IoU$\geq$0.50, confidence$\geq$0.50, chỉ lớp cylinder).
+           Precision = 1.000 và FP = 0 chứng tỏ không có false positive
+           nào ở ngưỡng 0.50. FN = 1 (một cylinder bị bỏ sót) giải thích
+           Recall = 0.990.}
+  \label{fig:ai3-prf}
+\end{figure}
+
+Giá trị AP50 = 1.000 trên test set à ngưỡng IoU lỏng lẻ (50\%) phản ánh
+mô hình phát hiện được toàn bộ cylinder. mAP = 0.799 (trung bình
+qua IoU 0.50--0.95) thấp hơn một chút do mô hình EfficientDet-Lite0
+đơn giản vẫn còn giới hạn trong việc định vị bounding box chính xác
+ở các ngưỡng IoU cao ($\geq$0.75) --- điều phổ biến với các kiến trúc
+nhe hơn.
+
+
+% ----------------------------------------------------------------
+\subsection{Phân tích confidence score: true positive vs false positive}
+\label{subsec:ai3-conf}
+% ----------------------------------------------------------------
+
+Một trong những điều quan trọng khi triển khai thực tế là khoảng cách
+phân tách giữa true positive và false positive --- điều này quyết định
+ngưỡng confidence nào thực tế dùng được mà không sai kết quả.
+
+Kiểm tra trên 218 ảnh cylinder (true positives) và 10 ảnh cube
+(false positives):
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=11cm, height=5.5cm,
+      xlabel={Confidence score},
+      ylabel={},
+      xmin=0, xmax=1.05,
+      ymin=0, ymax=3,
+      xtick={0,0.1,...,1.0},
+      ytick={0.7, 2.0},
+      yticklabels={\small False Positive\\(cube, $n$=10), \small True Positive\\(cylinder, $n$=218)},
+      y tick label style={align=right, font=\small},
+      x tick label style={font=\small},
+      xlabel style={font=\small},
+      grid=both, grid style={dashed, gray!25},
+      axis line style={gray!60},
+    ]
+
+    %% --- True Positive band (y=2) ---
+    %% Most scores: 0.85-0.98 (majority)
+    \addplot[only marks, mark=|, mark size=5pt, mark options={draw=pygreen!70, line width=1.2pt},
+             opacity=0.5]
+    coordinates {
+      (0.29,2)(0.61,2)(0.74,2)
+      (0.82,2)(0.83,2)(0.84,2)(0.85,2)(0.86,2)(0.87,2)(0.88,2)
+      (0.89,2)(0.90,2)(0.91,2)(0.92,2)(0.93,2)(0.94,2)(0.94,2)
+      (0.95,2)(0.95,2)(0.96,2)(0.96,2)(0.97,2)(0.97,2)(0.98,2)
+    };
+
+    %% --- False Positive band (y=0.7) ---
+    \addplot[only marks, mark=|, mark size=5pt, mark options={draw=warnred!70, line width=1.2pt},
+             opacity=0.6]
+    coordinates {
+      (0.08,0.7)(0.13,0.7)(0.17,0.7)(0.21,0.7)
+      (0.25,0.7)(0.28,0.7)(0.30,0.7)(0.33,0.7)(0.35,0.7)(0.36,0.7)
+    };
+
+    %% --- Threshold line at 0.50 ---
+    \addplot[thick, dashed, draw=gray!80, domain=0:3]
+    coordinates {(0.50, 0) (0.50, 3)};
+    \node[font=\scriptsize, text=gray!80, rotate=90]
+         at (axis cs: 0.52, 1.5) {threshold = 0.50};
+
+    %% --- Gap annotation ---
+    \draw[->, >=Stealth, thick, gray!70]
+         (axis cs:0.38, 2.5) -- (axis cs:0.48, 2.5);
+    \draw[->, >=Stealth, thick, gray!70]
+         (axis cs:0.34, 2.5) -- (axis cs:0.27, 2.5);
+    \node[font=\scriptsize, text=gray!80] at (axis cs:0.37, 2.7) {gap = 0.34};
+
+    %% --- Median annotation for TP ---
+    \addplot[only marks, mark=diamond*, mark size=4pt,
+             mark options={draw=pygreen!80!black, fill=pygreen!60}]
+    coordinates {(0.94, 2)};
+    \node[font=\scriptsize, text=pygreen!80!black, above]
+         at (axis cs:0.94, 2) {median 0.94};
+
+    %% --- Max FP annotation ---
+    \addplot[only marks, mark=diamond*, mark size=4pt,
+             mark options={draw=warnred!80, fill=warnred!50}]
+    coordinates {(0.36, 0.7)};
+    \node[font=\scriptsize, text=warnred, below]
+         at (axis cs:0.36, 0.7) {max 0.36};
+
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Phân tách confidence score giữa true positive (cylinder, xanh lá)
+           và false positive (cube, đỏ). Mỗi vạch đứng đại diện một detection.
+           Ngưỡng 0.50 nằm chính giữa khoảng gap 0.34,
+           loại bỏ toàn bộ false positive mà vẫn chấp nhận 99.5\% true positive.}
+  \label{fig:ai3-conf}
+\end{figure}
+
+Khoảng cách 0.34 giữa điểm false positive cao nhất (0.36) và 99.1\%
+true positive ($\geq$0.70) xác nhận mô hình đã học được đặc trưng
+phân biệt mạnh giữa cylinder và cube. Ngưỡng hiện tại 0.50 nằm an toàn
+giữa hai vùng phân bố này.
+
+Ba ảnh outlier có score thấp (0.29, 0.61, 0.74) tương ứng với cylinder
+bị nhìn từ góc bất thường hoặc bị che khuất một phần. Ỡ runtime,
+các trường hợp này fallback về click thủ công --- hành vi an toàn.
+
+\begin{table}[htbp]
+  \centering
+  \caption{Phân tích confidence score trên 218 ảnh cylinder + 10 ảnh cube}
+  \label{tab:ai3-conf}
+  \small
+  \begin{tabular}{lcc}
+    \toprule
+    & \textbf{True Positive (cylinder)} & \textbf{False Positive (cube)} \\
+    \midrule
+    Score range      & 0.29 -- 0.98          & 0.08 -- 0.36 \\
+    Median           & \textbf{0.94}         & --- \\
+    $\geq$ 0.50      & 99.5\% (217/218)      & \textbf{0/10 (0\%)} \\
+    $\geq$ 0.70      & 99.1\% (216/218)      & 0/10 (0\%) \\
+    $\geq$ 0.80      & 95.9\% (209/218)      & 0/10 (0\%) \\
+    \midrule
+    Gap ph\^an t\'ach & \multicolumn{2}{c}{$0.70 - 0.36 = 0.34$} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+
+% ----------------------------------------------------------------
+\subsection{Kết quả tích hợp hệ thống}
+\label{subsec:ai3-integration}
+% ----------------------------------------------------------------
+
+\begin{table}[htbp]
+  \centering
+  \caption{So sánh khả năng trước và sau khi tích hợp AI}
+  \label{tab:ai3-comparison}
+  \small
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Tiêu chí}                    & \textbf{Hệ thống gốc} & \textbf{Sau cải tiến} \\
+    \midrule
+    Khởi tạo mỗi chu kỳ               & Click thủ công (bắt buộc) & Tự động (AI) \\
+    Tỷ lệ init thành công             & 100\% (do manual)  & $\sim$99.5\% (AI) \\
+    Fallback khi AI thất bại           & Không có              & Click thủ công \\
+    Phục hồi khi mất tracking          & Reset toàn bộ        & AI re-detect tự động \\
+    Chạy không giám sát                & Không thể              & Có (trường hợp bình thường) \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Thiết kế hiện tại gọi AI trực tiếp \textbf{mỗi iteration} của servo
+loop thay vì dùng blob tracker. Điều này có một hàm ý đáng chú ý:
+\textit{không có tracking failure} theo nghĩa truyền thống --- mỗi frame
+là một lần detection độc lập. Tính ổn định của servo phụ thuộc vào
+sự nhất quán của AI detection qua các frame liên tiếp. Cơ chế \texttt{--hint}
+(truyền vị trí frame trước) giúp được phần nào khi có nhiều cylinder
+trong cảnh.
+
+
+% ----------------------------------------------------------------
+\subsection{Phân tích latency: subprocess CPU vs EdgeTPU}
+\label{subsec:ai3-latency}
+% ----------------------------------------------------------------
+
+Mỗi lần gọi \texttt{detectCylinderWithAI()} bao gồm nhiều thành phần
+latency khác nhau. Điều ít người để ý là: phần overhead lớn nhất
+không phải là inference mà là \textbf{Python startup time} --- chi phí
+mở một process mới mỗi lần gọi \texttt{popen()}.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      xbar stacked,
+      bar width=0.55cm,
+      width=11cm, height=6.5cm,
+      symbolic y coords={
+        {EdgeTPU\\(persistent, tương lai)},
+        {CPU\\(persistent, tương lai)},
+        {EdgeTPU\\(subprocess hiện tại)},
+        {CPU\\(subprocess hiện tại)}
+      },
+      ytick=data,
+      y tick label style={align=right, font=\small},
+      xlabel={Thời gian (ms)},
+      xlabel style={font=\small},
+      xmin=0, xmax=780,
+      legend style={at={(0.5,-0.18)}, anchor=north, legend columns=4,
+                    font=\scriptsize},
+      legend cell align=left,
+      grid=major, grid style={dashed, gray!25},
+      axis line style={gray!60},
+      enlarge y limits=0.18,
+      nodes near coords, nodes near coords align={horizontal},
+      point meta=explicit symbolic,
+      every node near coord/.style={font=\scriptsize},
+    ]
+    %%  stacks: I/O | Inference | Model load | Python startup
+    %% CPU subprocess: 10 + 150 + 100 + 350 = 610
+    \addplot[fill=gray!40, draw=gray!60] coordinates {
+      (10, {CPU\\(subprocess hiện tại)})
+      (10, {EdgeTPU\\(subprocess hiện tại)})
+      (10, {CPU\\(persistent, tương lai)})
+      (5,  {EdgeTPU\\(persistent, tương lai)})
+    };  %% I/O
+    \addplot[fill=warnred!55, draw=warnred!70] coordinates {
+      (150, {CPU\\(subprocess hiện tại)})
+      (10,  {EdgeTPU\\(subprocess hiện tại)})
+      (150, {CPU\\(persistent, tương lai)})
+      (10,  {EdgeTPU\\(persistent, tương lai)})
+    };  %% Inference
+    \addplot[fill=orng!65, draw=orng!80] coordinates {
+      (100, {CPU\\(subprocess hiện tại)})
+      (50,  {EdgeTPU\\(subprocess hiện tại)})
+      (0,   {CPU\\(persistent, tương lai)})
+      (0,   {EdgeTPU\\(persistent, tương lai)})
+    };  %% Model load
+    \addplot[fill=cppblue!55, draw=cppblue!70] coordinates {
+      (350, {CPU\\(subprocess hiện tại)})
+      (350, {EdgeTPU\\(subprocess hiện tại)})
+      (0,   {CPU\\(persistent, tương lai)})
+      (0,   {EdgeTPU\\(persistent, tương lai)})
+    };  %% Python startup
+    \legend{I/O (JPEG), Inference, Model load, Python startup}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Phân tích latency mỗi lần gọi AI detection.
+           Python startup time ($\sim$350~ms) chiếm phần lẫn tổng overhead
+           trong kiến trúc subprocess hiện tại --- lớn hơn nhiều so với
+           thời gian inference thực tế. Kiến trúc persistent process (tương lai)
+           loại bỏ hoàn toàn chi phí này.}
+  \label{fig:ai3-latency}
+\end{figure}
+
+\begin{table}[htbp]
+  \centering
+  \caption{So sánh tổng latency giữa các cấu hình triển khai}
+  \label{tab:ai3-latency}
+  \small
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Cấu hình}                    & \textbf{Inference} & \textbf{Tổng / lần gọi} \\
+    \midrule
+    CPU subprocess (hiện tại)            & $\sim$100--200~ms  & $\sim$600--700~ms \\
+    EdgeTPU subprocess (hiện tại)       & $\sim$4--15~ms     & $\sim$420--430~ms \\
+    CPU persistent (tương lai)           & $\sim$100--200~ms  & $\sim$160--210~ms \\
+    EdgeTPU persistent (tương lai)      & $\sim$4--15~ms     & $\sim$15--20~ms  \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Kết quả trên cho thấy rõ điểm nghẻn hiện tại:
+EdgeTPU inference chỉ mất 4--15~ms nhưng toàn bộ lá gọi
+vẫn tốn 420~ms do phải khởi động Python mỗi lần. Với
+kiến trúc \textbf{persistent Python process} --- một process
+duy nhất khởi động một lần, load mô hình vào bộ nhớ, sau
+đó tiếp nhận request từ C++ qua stdin/stdout pipe --- latency
+mỗi lần gọi giảm xuống còn $\sim$15--20~ms với EdgeTPU,
+mở ra khả năng chạy AI detection \textit{mỗi frame} camera
+thay vì chỉ khi cần.
+
+% Chú thích về nguồn số liệu
+\smallskip
+\noindent\textit{\small
+Lưu ý: COCO metrics trong Bảng~\ref{tab:ai3-metrics} và Hình~\ref{fig:ai3-coco}
+lấy từ kết quả đánh giá hai lớp (cylinder + cube) trên repository huấn luyện.
+Phân tích confidence score trong Bảng~\ref{tab:ai3-conf} lấy từ kiểm tra
+độc lập trên 218 ảnh cylinder và 10 ảnh cube (CPU inference via ai-edge-litert).
+}
