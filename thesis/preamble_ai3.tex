@@ -1,0 +1,82 @@
+%%=============================================================
+%% preamble_ai3.tex
+%% Preamble dùng chung cho chapter4_4.tex và chapter5_4.tex
+%%
+%% Đưa vào main.tex bằng:  \input{preamble_ai3}
+%% Hoặc copy thẳng các \usepackage cần thiết vào preamble của main.
+%%=============================================================
+
+%% Tiếng Việt
+\usepackage[T5]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[vietnamese]{babel}
+
+%% TikZ và các thư viện vẻ hình
+\usepackage{tikz}
+\usetikzlibrary{
+  shapes.geometric,
+  arrows.meta,
+  positioning,
+  fit,
+  backgrounds,
+  calc,
+  decorations.pathreplacing,
+  patterns,
+}
+
+%% PGFPlots cho biểu đồ
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{pgfplotstable}
+
+%% Code listings
+\usepackage{listings}
+\usepackage{xcolor}
+
+%% Màu dùng chung (cần định nghĩa trước khi \input chapter)
+\definecolor{cppblue}{RGB}{30,100,200}
+\definecolor{pygreen}{RGB}{40,150,80}
+\definecolor{warnred}{RGB}{200,60,60}
+\definecolor{orng}{RGB}{220,130,30}
+
+%% Cài đặt listings mặc định
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{cppblue},
+  commentstyle=\color{gray!70},
+  stringstyle=\color{orng},
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  framexleftmargin=4pt,
+  xleftmargin=8pt,
+  numbers=none,
+}
+
+%% Bảng đẹp hơn
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{subcaption}
+
+%% Đảm bảo float không trọn ra ngoài section
+\usepackage[section]{placeins}
+
+%%=============================================================
+%% Cách sử dụng trong main.tex:
+%%
+%%   \documentclass[12pt,a4paper]{report}
+%%   \input{preamble_ai3}
+%%   \begin{document}
+%%     ...
+%%     \chapter{Thiết kế và Hiện thực}
+%%     ...
+%%     \input{chapter4_4}   %% mục 4.4
+%%     ...
+%%     \chapter{Kết quả và Đánh giá}
+%%     ...
+%%     \input{chapter5_4}   %% mục 5.4
+%%     ...
+%%   \end{document}
+%%
+%% Compile: pdflatex -> pdflatex (chạy 2 lần để có label/ref đúng)
+%%=============================================================
