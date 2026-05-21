@@ -452,7 +452,8 @@ int main()
   vpServo task;
   vpVelocityTwistMatrix cVe;
   vpMatrix eJe;
-
+  vpDot2 dot;
+  vpImagePoint cog;
   // ========================
   // Biến điều khiển
   // ========================
@@ -520,16 +521,21 @@ int main()
         if (reached) {
           try {
             // INIT: no hint — pick highest-confidence cylinder
+            vpImagePoint ai_hint;
             if (detectCylinderWithAI(I, ai_hint)) {
               std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+              dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
             }
             else {
-              std::cout << "[AI] Detection fail, fallback to init click." << std::endl;
+              std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+              dot.initTracking(I);           // original manual-click fallback
             }
-            vpDisplay::displayCross(I, ai_hint, 10, vpColor::blue);
+            cog = dot.getCog();
+
+            vpDisplay::displayCross(I, cog, 10, vpColor::blue);
             vpDisplay::flush(I);
 
-            vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
+            vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
 
             p.set_Z(1);
 
@@ -569,25 +575,49 @@ int main()
           // the last known position, not the highest-confidence one.
           // This prevents the servo from jumping to a different cylinder
           // when scores fluctuate as the robot moves.
-          if (detectCylinderWithAI(I, ai_hint, "ai_module/config.json", &ai_hint)) {
-            std::cout << "[AI] Cylinder tracked at: " << ai_hint << std::endl;
-          }
-          else {
-            std::cout << "[AI] Lost detection, holding last position." << std::endl;
-          }
+          // vpImagePoint ai_hint;
+          // if (detectCylinderWithAI(I, ai_hint)) {
+          //   std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+          //   dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
+          // }
+          // else {
+          //   std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+          //   dot.initTracking(I);           // original manual-click fallback
+          // }
+          // cog = dot.getCog();
+          dot.track(I);
+          cog = dot.getCog();
         }
         catch (const vpTrackingException &e) {
-          sendClassified = false;
-          pose_init = false;
-          gripper_init = false;
-          task.kill();
-          state = PREINIT;
-          continue;
+          // sendClassified = false;
+          // pose_init = false;
+          // gripper_init = false;
+          // task.kill();
+          // state = PREINIT;
+          // continue;
+          vpImagePoint ai_hint;
+          if (detectCylinderWithAI(I, ai_hint)) {
+            std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+            dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
+          }
+          else {
+            std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+            dot.initTracking(I);           // original manual-click fallback
+            continue;
+          }
+          cog = dot.getCog();
+
+          vpDisplay::displayCross(I, cog, 10, vpColor::blue);
+          vpDisplay::flush(I);
+
+          vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
         }
         // Display a green cross at the center of gravity position in the image
-        vpDisplay::displayCross(I, ai_hint, 10, vpColor::green);
+        // vpDisplay::displayCross(I, ai_hint, 10, vpColor::green);
+        // vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
+        vpDisplay::displayCross(I, cog, 10, vpColor::green);
 
-        vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
+        vpFeatureBuilder::create(p, cam, dot);
         robot.get_eJe(eJe);
         task.set_eJe(eJe);
 
