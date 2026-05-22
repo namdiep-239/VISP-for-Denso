@@ -109,17 +109,14 @@ người vận hành, loại bỏ khả năng chạy tự động không giám s
 
   \draw[arr]  (R1) -- (R2);
   \draw[garr] (R2) -- (R3);
-  %% vpDot2 bình thường thì không xuống R4
   \draw[garr, dashed] (R3) -- (R4)
         node[midway, right, font=\scriptsize, text=warnred!70]
         {vpTrackingException};
-  %% sau khi AI re-init thì quay lại JOINT
   \draw[garr, dashed] (R4.east)
         to[out=0,in=0,looseness=1.5] (R3.east)
         node[midway, right, font=\scriptsize, text=pygreen!70]
         {re-init xong};
 
-  %% fallback khi AI fail (INIT)
   \node[manual, right=1.2cm of R3] (FB)
        {{\scriptsize fallback:}\\click thủ công};
   \draw[rarr, dashed] (R2.east) -| (FB.north)
@@ -129,7 +126,6 @@ người vận hành, loại bỏ khả năng chạy tự động không giám s
   \node[font=\bfseries\small, text=pygreen!80!black, above=0.5cm of R1]
        {\textit{Sau cải tiến}};
 
-  %% Đường phân cách
   \draw[thick, dashed, gray!50]
       ($(L1.east)!0.5!(R1.west)+(0,0.8)$) -- ++(0,-7.0);
 
@@ -201,43 +197,44 @@ hai xuất hiện cùng cảnh. Ở runtime, chỉ kết quả cylinder
 Toàn bộ ảnh được thu trực tiếp từ camera eye-in-hand gắn trên
 robot Denso, đảm bảo điều kiện thực tế sát với lúc triển khai.
 
+% NOTE: symbolic y coords must NOT contain + or () — use short safe keys,
+%       then map to display labels via yticklabels.
 \begin{figure}[htbp]
   \centering
   \begin{tikzpicture}
     \begin{axis}[
-      xbar, bar width=0.42cm,
+      xbar, bar width=0.48cm,
       xlabel={Số lượng ảnh (xấp xỉ)},
-      ylabel={Danh mục},
-      symbolic y coords={
-        Background,
-        2 cube + 3 cyl,
-        2 cylinders,
-        3 cylinders,
-        1 cyl + 1 cube,
-        1 cube,
-        1 cylinder,
-        Cylinder (gốc)
-      },
+      symbolic y coords={bg, c2c3, cyl2, cyl3, c1c1, cube1, cyl1, cylbase},
       ytick=data,
+      yticklabels={
+        Background,
+        {2 cube + 3 cyl},
+        {2 cylinders},
+        {3 cylinders},
+        {1 cyl + 1 cube},
+        {1 cube},
+        {1 cylinder},
+        {Cylinder (gốc)}
+      },
       xmin=0, xmax=175,
-      width=9.5cm, height=6.8cm,
+      width=9.5cm, height=9.0cm,
       nodes near coords,
       nodes near coords align={horizontal},
       every node near coord/.style={font=\scriptsize},
       tick label style={font=\small},
       xlabel style={font=\small},
-      ylabel style={font=\small},
-      enlarge y limits=0.08,
+      enlarge y limits=0.09,
     ]
     \addplot[fill=cppblue!55, draw=cppblue!80] coordinates {
-      (38,  Background)
-      (28,  2 cube + 3 cyl)
-      (52,  2 cylinders)
-      (43,  3 cylinders)
-      (68,  1 cyl + 1 cube)
-      (38,  1 cube)
-      (108, 1 cylinder)
-      (144, Cylinder (gốc))
+      (38,  bg)
+      (28,  c2c3)
+      (52,  cyl2)
+      (43,  cyl3)
+      (68,  c1c1)
+      (38,  cube1)
+      (108, cyl1)
+      (144, cylbase)
     };
     \end{axis}
   \end{tikzpicture}
@@ -472,7 +469,6 @@ dot.initTracking(I, detected_center);  // khởi tạo vpDot2
   \draw[arr](cls.west) to[out=180,in=270,looseness=0.8] (pre.south)
         node[lbl,left,pos=0.5]{cycle\\restart};
 
-  %% AI recovery khi vpDot2 báo lỗi --- vẫn ở trong JOINT
   \node[ai, below=1.2cm of jnt] (rec)
         {AI re-init\\{\scriptsize dot.initTracking\\(I, ai\_hint)}};
 
@@ -485,7 +481,6 @@ dot.initTracking(I, detected_center);  // khởi tạo vpDot2
         node[midway, left, font=\scriptsize, text=pygreen!70]
         {init xong};
 
-  %% Fallback
   \draw[arr, warnred!70, dashed]
         (ini.south) -- ++(0,-0.7)
         node[below, font=\scriptsize, text=warnred]
