@@ -210,16 +210,13 @@ hai xuất hiện cùng cảnh. Ở runtime, chỉ kết quả cylinder
 Toàn bộ ảnh được thu trực tiếp từ camera eye-in-hand gắn trên
 robot Denso, đảm bảo điều kiện thực tế sát với lúc triển khai.
 
-% NOTE: symbolic y coords must NOT contain + or () — use short safe keys,
-%       then map to display labels via yticklabels.
 \begin{figure}[htbp]
   \centering
   \begin{tikzpicture}
     \begin{axis}[
-      xbar, bar width=0.48cm,
+      xbar, bar width=0.45cm,
       xlabel={Số lượng ảnh (xấp xỉ)},
-      symbolic y coords={bg, c2c3, cyl2, cyl3, c1c1, cube1, cyl1, cylbase},
-      ytick=data,
+      ytick={1,2,3,4,5,6,7,8},
       yticklabels={
         Background,
         {2 cube + 3 cyl},
@@ -231,23 +228,23 @@ robot Denso, đảm bảo điều kiện thực tế sát với lúc triển kha
         {Cylinder (gốc)}
       },
       xmin=0, xmax=175,
+      ymin=0.3, ymax=8.7,
       width=9.5cm, height=9.0cm,
       nodes near coords,
       nodes near coords align={horizontal},
       every node near coord/.style={font=\scriptsize},
       tick label style={font=\small},
       xlabel style={font=\small},
-      enlarge y limits=0.09,
     ]
     \addplot[fill=cppblue!55, draw=cppblue!80] coordinates {
-      (38,  bg)
-      (28,  c2c3)
-      (52,  cyl2)
-      (43,  cyl3)
-      (68,  c1c1)
-      (38,  cube1)
-      (108, cyl1)
-      (144, cylbase)
+      (38, 1)
+      (28, 2)
+      (52, 3)
+      (43, 4)
+      (68, 5)
+      (38, 6)
+      (108, 7)
+      (144, 8)
     };
     \end{axis}
   \end{tikzpicture}
