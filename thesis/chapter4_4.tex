@@ -49,7 +49,7 @@ là lái robot sao cho cylinder nằm đúng tâm ảnh thì dừng lại.
 ViSP theo dõi cylinder theo frame bằng bộ blob tracker \texttt{vpDot2} ---
 hoạt động nhanh, chạy mỗi frame camera và cho ra vị trí tâm của vùng
 sáng/tối mà nó đang bám. Vấn đề là \texttt{vpDot2} cần một
-\textbf{vị trí khởi đầu} để biết phải theo dõi vùng nào --- và điềm
+\textbf{vị trí khởi đầu} để biết phải theo dõi vùng nào --- và điểm
 này thường được cung cấp bằng cách người vận hành click chuột.
 
 Hệ thống ban đầu vận hành như sau: robot về home pose, rồi
@@ -136,7 +136,7 @@ người vận hành, loại bỏ khả năng chạy tự động không giám s
   \end{tikzpicture}
   \caption{So sánh luồng vận hành trước và sau khi tích hợp AI.
            AI thay thế thao tác click thủ công trong bước khởi tạo
-           vpDot2 tracker. ở trạng thái JOINT, vpDot2 vẫn chạy bình
+           vpDot2 tracker. Ở trạng thái JOINT, vpDot2 vẫn chạy bình
            thường; AI chỉ được gọi khi vpDot2 throw exception.}
   \label{fig:ai3-before-after}
 \end{figure}
@@ -146,7 +146,10 @@ trọng cần nhấn mạnh là: \textbf{module AI không thay thế vpDot2
 tracker}, mà chỉ đảm nhận vai trò cung cấp \textit{vị trí khởi
 đầu} cho tracker đó. vpDot2 vẫn là lõi tracking trong JOINT state
 với tốc độ per-frame, AI chỉ được gọi thêm một lần nữa khi
-tracker bị mất target.
+tracker bị mất target. Cách tiếp cận dùng AI tracking trực tiếp
+mỗi frame cũng đã được thử nghiệm, nhưng gây dao động servo do
+latency suy luận ($\sim$100--200\,ms/lần) và biến động confidence
+score --- vpDot2 với $\sim$1--5\,ms/frame ổn định hơn đáng kể.
 
 
 % ----------------------------------------------------------------
@@ -163,7 +166,7 @@ sẵn trong môi trường phát triển. \textbf{EfficientDet-Lite0}
 đáp ứng tất cả: đây là biến thể nhỏ nhất trong họ EfficientDet
 được Google tối ưu cho thiết bị edge, input cố định $320\times320$
 pixel, backbone là EfficientNet-B0 đã được simplify. Quan trọng
-hon: inference chỉ được thực hiện \textbf{một lần mỗi chu kỳ}
+hơn: inference chỉ được thực hiện \textbf{một lần mỗi chu kỳ}
 (tại home pose), nên latency $\sim$100--200~ms trên CPU hoàn toàn
 chấp nhận được.
 
@@ -286,7 +289,7 @@ Pascal VOC XML (yêu cầu của \texttt{tflite\_model\_maker}).
 
 Transfer learning với \texttt{train\_whole\_model=False} --- chỉ
 fine-tune detection head, giữ nguyên backbone --- phù hợp với
-khích thước tập dữ liệu nhỏ và giảm nguy cơ overfitting.
+kích thước tập dữ liệu nhỏ và giảm nguy cơ overfitting.
 
 
 % ----------------------------------------------------------------
@@ -301,7 +304,7 @@ kích thước giảm $\sim4\times$ và inference nhanh hơn nhiều
 ($\sim$4--15~ms so với $\sim$100--200~ms trên CPU). Điều này
 không quá quan trọng trong trường hợp gọi một lần/chu kỳ,
 nhưng sẽ rất có giá trị nếu cần phản hồi nhanh trong các
-truờng hợp re-init.
+trường hợp re-init.
 
 Post-Training Quantization (PTQ) sử dụng tập train làm
 \textit{representative dataset} để calibrate scale và zero\_point
@@ -336,13 +339,13 @@ Chọn giữa hai file được thực hiện tự động qua
 
 \subsubsection*{Quyết định thiết kế}
 
-Câu hỏi đạt ra là: làm thế nào gọi mô hình TFLite từ code C++
+Câu hỏi đặt ra là: làm thế nào gọi mô hình TFLite từ code C++
 điều khiển robot? Thay vì link trực tiếp thư viện TFLite C++ vào
 build system của ViSP (cần sửa CMakeLists và phụ thuộc version
 build cụ thể), hệ thống áp dụng kiến trúc \textbf{subprocess
 model}: C++ gọi Python script như một tiến trình con qua
 \texttt{popen()}, giao tiếp một chiều qua stdout. Module AI
-hoàn toàn tách biệt --- cập nhận mô hình không cần recompile
+hoàn toàn tách biệt --- cập nhật mô hình không cần recompile
 code robot.
 
 \begin{figure}[htbp]
@@ -518,7 +521,7 @@ vpFeatureBuilder::create(p, cam, dot);
 \end{lstlisting}
 
 \paragraph{JOINT.}
-vpDot2 chạy mỗi frame camera để bảm theo cylinder:
+vpDot2 chạy mỗi frame camera để bám theo cylinder:
 \begin{lstlisting}[language=C++]
 try {
     dot.track(I);           // vpDot2: nhanh, per-frame
@@ -640,6 +643,6 @@ $\mathbf{s}=(x,y)$, desired position $\mathbf{s}^*=(0,0,1)$.
 
 Control law:
 $\mathbf{v} = -\lambda\,\mathbf{L}_{s^*}^{+}\,\mathbf{e}$,
-tich phân Euler:
+tích phân Euler:
 $\mathbf{q}_{k+1} = \mathbf{q}_k + \mathbf{v}\,\Delta t$.
 Velocity được saturate trước khi gửi xuống robot.
