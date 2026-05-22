@@ -195,7 +195,7 @@ bool gripperOpen(serialib *gripper)
                   {"T", 121},
                   {"acc", 20.0},
                   {"angle", 1.7486619853687655}, // Góc mở
-                  {"spd", 200.0}
+                  {"spd", 500.0}
   };
 
   // Tạo chuỗi command
@@ -212,7 +212,7 @@ bool gripperOpen(serialib *gripper)
       int T = object.value("T", -1);
       int load = object.value("load", -1);
 
-      if (T == 1051 && load >= -150) {
+      if (T == 1051 && load >= 50) {
         return true;
       }
     }
@@ -232,7 +232,7 @@ bool gripperClose(serialib *gripper)
                   {"T", 121},
                   {"acc", 20.0},
                   {"angle", 3.1447332076700687}, // Góc mở
-                  {"spd", 200.0}
+                  {"spd", 500.0}
   };
 
   // Tạo chuỗi command trực tiếp
@@ -248,7 +248,7 @@ bool gripperClose(serialib *gripper)
       int T = object.value("T", -1);
       int load = object.value("load", -1);
 
-      if (T == 1051 && load <= -150) {
+      if (T == 1051 && load <= -100) {
         return true;
       }
     }
@@ -452,7 +452,8 @@ int main()
   vpServo task;
   vpVelocityTwistMatrix cVe;
   vpMatrix eJe;
-
+  vpDot2 dot;
+  vpImagePoint cog;
   // ========================
   // Biến điều khiển
   // ========================
@@ -463,6 +464,7 @@ int main()
   bool pose_init = false;
   bool sendClassified = false;
   bool flushedGripper = false;
+  bool init_feature = false;
   vpChrono chrono, chrene;
   for (;;) {
     cap >> frame;
@@ -519,20 +521,28 @@ int main()
         if (reached) {
           try {
             // INIT: no hint — pick highest-confidence cylinder
+            vpImagePoint ai_hint;
             if (detectCylinderWithAI(I, ai_hint)) {
               std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+              dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
             }
             else {
-              std::cout << "[AI] Detection fail, fallback to init click." << std::endl;
+              std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+              dot.initTracking(I);           // original manual-click fallback
             }
-            vpDisplay::displayCross(I, ai_hint, 10, vpColor::blue);
+            cog = dot.getCog();
+
+            vpDisplay::displayCross(I, cog, 10, vpColor::blue);
             vpDisplay::flush(I);
 
-            vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
+            vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
 
             p.set_Z(1);
 
-            task.addFeature(p, pd);
+            if (!init_feature) {
+              task.addFeature(p, pd);
+              init_feature = true;
+            }
             task.print();
 
             pose_init = true;
@@ -565,25 +575,49 @@ int main()
           // the last known position, not the highest-confidence one.
           // This prevents the servo from jumping to a different cylinder
           // when scores fluctuate as the robot moves.
-          if (detectCylinderWithAI(I, ai_hint, "ai_module/config.json", &ai_hint)) {
-            std::cout << "[AI] Cylinder tracked at: " << ai_hint << std::endl;
-          }
-          else {
-            std::cout << "[AI] Lost detection, holding last position." << std::endl;
-          }
+          // vpImagePoint ai_hint;
+          // if (detectCylinderWithAI(I, ai_hint)) {
+          //   std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+          //   dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
+          // }
+          // else {
+          //   std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+          //   dot.initTracking(I);           // original manual-click fallback
+          // }
+          // cog = dot.getCog();
+          dot.track(I);
+          cog = dot.getCog();
         }
         catch (const vpTrackingException &e) {
-          sendClassified = false;
-          pose_init = false;
-          gripper_init = false;
-          task.kill();
-          state = PREINIT;
-          continue;
+          // sendClassified = false;
+          // pose_init = false;
+          // gripper_init = false;
+          // task.kill();
+          // state = PREINIT;
+          // continue;
+          vpImagePoint ai_hint;
+          if (detectCylinderWithAI(I, ai_hint)) {
+            std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+            dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
+          }
+          else {
+            std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+            dot.initTracking(I);           // original manual-click fallback
+            continue;
+          }
+          cog = dot.getCog();
+
+          vpDisplay::displayCross(I, cog, 10, vpColor::blue);
+          vpDisplay::flush(I);
+
+          vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
         }
         // Display a green cross at the center of gravity position in the image
-        vpDisplay::displayCross(I, ai_hint, 10, vpColor::green);
+        // vpDisplay::displayCross(I, ai_hint, 10, vpColor::green);
+        // vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
+        vpDisplay::displayCross(I, cog, 10, vpColor::green);
 
-        vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
+        vpFeatureBuilder::create(p, cam, dot);
         robot.get_eJe(eJe);
         task.set_eJe(eJe);
 
@@ -634,17 +668,16 @@ int main()
     }
     else if (state == CLASSIFIED) {
       // gripperClose(gripper);
-      vpTime::wait(1000);
       // SEND oke to RC5 controller
       //
       // robot.uartSend(converged, 4);
       if (!sendClassified) {
-        q_new[0] = 0;
-        q_new[1] = 0;
-        q_new[2] = 90;
+        q_new[0] = 53.35;
+        q_new[1] = 25.15;
+        q_new[2] = 91.58;
         q_new[3] = 0;
-        q_new[4] = 90;
-        q_new[5] = 0;
+        q_new[4] = 63.27;
+        q_new[5] = 53.35;
 
         robot.sendPosition(q_new.data);
         sendClassified = true;
@@ -662,56 +695,16 @@ int main()
         std::abs(q_cur[5] - q_new[5])   < 0.01;
 
       if (reached) {
+        gripperFlush(gripper);
+        gripperOpen(gripper);
+        vpTime::wait(500);
         sendClassified = false;
-        state = NEXT_STEP;
-      }
-    }
-    else if (state == NEXT_STEP) {
-      if (!sendClassified) {
-        q_new[0] = -90;
-        q_new[1] = 50;
-        q_new[2] = 100;
-        q_new[3] = 0;
-        q_new[4] = 40;
-        q_new[5] = 0;
-
-        robot.sendPosition(q_new.data);
-
-        q_cur.rad2deg();
-        // gripperClose(gripper);
-        sendClassified = true;
-      }
-      robot.flush();
-      robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-      q_cur.rad2deg();
-      bool reached =
-        std::abs(q_cur[0] - q_new[0])   < 0.01 &&
-        std::abs(q_cur[1] - q_new[1])   < 0.01 &&
-        std::abs(q_cur[2] - q_new[2])  < 0.01 &&
-        std::abs(q_cur[3] - q_new[3])   < 0.01 &&
-        std::abs(q_cur[4] - q_new[4])  < 0.01 &&
-        std::abs(q_cur[5] - q_new[5])   < 0.01;
-
-      if (reached) {
-        // vpTime::wait(3000);
-        if (!flushedGripper) {
-          gripperClose(gripper);
-          gripperFlush(gripper);
-          flushedGripper = true;
-        }
-        if (gripperOpen(gripper)) {
-          sendClassified = false;
-          pose_init = false;
-          gripper_init = false;
-          task.kill();
-          std::cout << "###########################################################################" <<std::endl;
-          chrono.stop();
-          std::cout << "COMPLETE ONE " << chrono.getDurationMs() << std::endl;
-          state = PREINIT;
-        }
-      }
-      else {
-        gripperClose(gripper);
+        pose_init = false;
+        gripper_init = false;
+        std::cout << "###########################################################################" <<std::endl;
+        chrono.stop();
+        std::cout << "COMPLETE ONE " << chrono.getDurationMs() << std::endl;
+        state = PREINIT;
       }
     }
     vpDisplay::flush(I);
