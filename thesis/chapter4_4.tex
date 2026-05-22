@@ -64,70 +64,83 @@ người vận hành, loại bỏ khả năng chạy tự động không giám s
 \begin{figure}[htbp]
   \centering
   \begin{tikzpicture}[
-    node distance=0.8cm and 0.6cm,
-    bx/.style={draw, rounded corners=4pt, text width=3.0cm, align=center,
-               minimum height=0.9cm, font=\small},
+    bx/.style={draw, rounded corners=4pt, text width=2.8cm, align=center,
+               minimum height=0.85cm, font=\small},
     robot/.style={bx, draw=cppblue!70, fill=cppblue!8},
     manual/.style={bx, draw=warnred!70, fill=warnred!8},
     aibox/.style={bx, draw=pygreen!70, fill=pygreen!8},
-    dotbox/.style={bx, draw=cppblue!50, fill=cppblue!5,
-                   text width=3.0cm},
+    dotbox/.style={bx, draw=cppblue!50, fill=cppblue!5},
     arr/.style={->, >=Stealth, thick},
     rarr/.style={arr, draw=warnred!70},
     garr/.style={arr, draw=pygreen!70},
   ]
 
-  %% --- CỘT TRÁI: hệ thống gốc ---
+  %%-------- LEFT column (Trước cải tiến) --------
   \node[robot] (L1)
-        {PREINIT\\{\scriptsize robot $\to$ home pose}};
-  \node[manual, below=of L1] (L2)
-        {Click thủ công\\{\scriptsize khởi tạo vpDot2}};
-  \node[dotbox, below=of L2] (L3)
-        {JOINT\\{\scriptsize vpDot2 tracking}};
-  \node[manual, below=of L3] (L4)
-        {Mất tracking\\{\scriptsize $\to$ reset toàn bộ}};
+      {PREINIT\\{\scriptsize robot $\to$ home pose}};
+  \node[manual, below=0.85cm of L1] (L2)
+      {Click thủ công\\{\scriptsize khởi tạo vpDot2}};
+  \node[dotbox, below=0.85cm of L2] (L3)
+      {JOINT\\{\scriptsize vpDot2 tracking}};
+  \node[manual, below=0.85cm of L3] (L4)
+      {Mất tracking\\{\scriptsize $\to$ reset toàn bộ}};
 
-  \draw[arr]  (L1) -- (L2);
-  \draw[arr]  (L2) -- (L3);
-  \draw[rarr] (L3) -- (L4);
-  \draw[rarr, dashed] (L4.west)
-        to[out=190,in=170,looseness=1.3] (L1.west)
-        node[midway, left, font=\scriptsize, text=warnred!70] {reset};
+  \draw[arr]  (L1)--(L2);
+  \draw[arr]  (L2)--(L3);
+  \draw[rarr] (L3)--(L4);
 
-  \node[font=\bfseries\small, text=warnred, above=0.5cm of L1]
-       {\textit{Trước cải tiến}};
+  % Reset loop: right-angle path to the left, label on vertical segment
+  \draw[rarr, dashed]
+      (L4.west) -- ++(-0.8,0) coordinate (Lbot)
+      -- (Lbot |- L1.west) coordinate (Ltop)
+      -- (L1.west);
+  \node[left=3pt, font=\scriptsize, text=warnred!70]
+      at ($(Lbot)!0.5!(Ltop)$) {reset};
 
-  %% --- CỘT PHẢI: hệ thống mới ---
-  \node[robot, right=3.8cm of L1] (R1)
-        {PREINIT\\{\scriptsize robot $\to$ home pose}};
-  \node[aibox, below=of R1] (R2)
-        {AI detect\\{\scriptsize khởi tạo vpDot2}};
-  \node[dotbox, below=of R2] (R3)
-        {JOINT\\{\scriptsize vpDot2 tracking}};
-  \node[aibox, below=of R3] (R4)
-        {AI re-init\\{\scriptsize khi vpDot2 thất bại}};
+  \node[font=\bfseries\small, text=warnred, above=0.45cm of L1]
+      {\textit{Trước cải tiến}};
 
-  \draw[arr]  (R1) -- (R2);
-  \draw[garr] (R2) -- (R3);
-  \draw[garr, dashed] (R3) -- (R4)
-        node[midway, right, font=\scriptsize, text=warnred!70]
-        {vpTrackingException};
-  \draw[garr, dashed] (R4.east)
-        to[out=0,in=0,looseness=1.5] (R3.east)
-        node[midway, right, font=\scriptsize, text=pygreen!70]
-        {re-init xong};
+  %%-------- RIGHT column (Sau cải tiến) --------
+  \node[robot, right=3.9cm of L1] (R1)
+      {PREINIT\\{\scriptsize robot $\to$ home pose}};
+  \node[aibox, below=0.85cm of R1] (R2)
+      {AI detect\\{\scriptsize khởi tạo vpDot2}};
+  \node[dotbox, below=0.85cm of R2] (R3)
+      {JOINT\\{\scriptsize vpDot2 tracking}};
+  \node[aibox, below=0.85cm of R3] (R4)
+      {AI re-init\\{\scriptsize khi vpDot2 thất bại}};
 
-  \node[manual, right=1.2cm of R3] (FB)
-       {{\scriptsize fallback:}\\click thủ công};
-  \draw[rarr, dashed] (R2.east) -| (FB.north)
-        node[near start, above, font=\scriptsize, text=warnred]
-        {AI fail};
+  \draw[arr]  (R1)--(R2);
+  \draw[garr] (R2)--(R3);
 
-  \node[font=\bfseries\small, text=pygreen!80!black, above=0.5cm of R1]
-       {\textit{Sau cải tiến}};
+  % vpTrackingException: straight arrow R3 -> R4, label on the right
+  \draw[garr, dashed] (R3.south)--(R4.north)
+      node[midway, right=3pt, font=\scriptsize, text=warnred!70, align=left]
+      {vpTracking-\\Exception};
 
-  \draw[thick, dashed, gray!50]
-      ($(L1.east)!0.5!(R1.west)+(0,0.8)$) -- ++(0,-7.0);
+  % re-init xong: right-angle path on the left side
+  \draw[garr, dashed]
+      (R4.west) -- ++(-0.65,0) coordinate (Rbot)
+      -- (Rbot |- R3.west) coordinate (Rtop)
+      -- (R3.west);
+  \node[left=3pt, font=\scriptsize, text=pygreen!70, align=right]
+      at ($(Rbot)!0.5!(Rtop)$) {re-init\\xong};
+
+  % Fallback node to the right of R3
+  \node[manual, right=0.85cm of R3, text width=2.1cm] (FB)
+      {{\scriptsize fallback:}\\click thủ công};
+  % Right-angle arrow: R2.east -> corner -> FB.north
+  \coordinate (Fc) at (R2.east -| FB.north);
+  \draw[rarr, dashed] (R2.east) -- (Fc) -- (FB.north);
+  \node[above=2pt, font=\scriptsize, text=warnred]
+      at ($(R2.east)!0.5!(Fc)$) {AI fail};
+
+  \node[font=\bfseries\small, text=pygreen!80!black, above=0.45cm of R1]
+      {\textit{Sau cải tiến}};
+
+  %%-------- Separator --------
+  \draw[thick, dashed, gray!40]
+      ($(L1.east)!0.5!(R1.west)+(0,0.95)$) -- ++(0,-7.4);
 
   \end{tikzpicture}
   \caption{So sánh luồng vận hành trước và sau khi tích hợp AI.
