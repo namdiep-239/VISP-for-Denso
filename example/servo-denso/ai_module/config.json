@@ -4,8 +4,9 @@
   "confidence_threshold": 0.5,
   "image_size": 320,
   "class_names": [
-    "cylinder"
+    "cylinder",
+    "cube"
   ],
-  // "python_bin": "/home/nam/.pyenv/versions/3.9.17/envs/gesture_env/bin/python3"
-  "python_bin": "python3"
+  "python_bin": "/home/nam/.pyenv/versions/3.9.17/envs/gesture_env/bin/python3"
+  // "python_bin": "python3"
 }

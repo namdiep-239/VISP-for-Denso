@@ -64,10 +64,11 @@ def _suffix(detail):
 
 
 def run_inference(interpreter, input_details, output_details, img_bgr):
-    """Run one forward pass and return (boxes_pixel, scores).
+    """Run one forward pass and return (boxes_pixel, scores, class_ids).
 
     boxes_pixel: list of [x1, y1, x2, y2] in pixel coordinates
-    scores:      list of float confidence values (same length as boxes_pixel)
+    scores:      list of float confidence values (same length)
+    class_ids:   list of int class indices (0=cylinder, 1=cube)
 
     Tensor identification is done by shape, not by fixed index, because
     tflite_model_maker 0.4.x uses :0=num_det, :1=scores, :2=classes, :3=boxes
@@ -84,8 +85,10 @@ def run_inference(interpreter, input_details, output_details, img_bgr):
     interpreter.set_tensor(input_details[0]['index'], inp[np.newaxis])
     interpreter.invoke()
 
-    # Identify boxes tensor: shape [1, N, 4]
-    # Identify scores tensor: shape [1, N] with lowest name suffix (avoids class IDs)
+    # Identify tensors by shape:
+    #   boxes:   shape [1, N, 4]
+    #   scores:  shape [1, N], lowest name suffix (:1)
+    #   classes: shape [1, N], second-lowest suffix (:2)
     boxes_detail = None
     shape2_tensors = []
     for d in output_details:
@@ -95,11 +98,13 @@ def run_inference(interpreter, input_details, output_details, img_bgr):
         elif len(s) == 2:
             shape2_tensors.append(d)
 
-    scores_detail = sorted(shape2_tensors, key=_suffix)[0] if shape2_tensors else None
+    sorted_s2 = sorted(shape2_tensors, key=_suffix)
+    scores_detail = sorted_s2[0] if sorted_s2 else None
+    classes_detail = sorted_s2[1] if len(sorted_s2) > 1 else None
 
     if boxes_detail is None or scores_detail is None:
         print("[WARN] Cannot identify output tensors by shape", file=sys.stderr)
-        return [], []
+        return [], [], []
 
     raw_boxes = interpreter.get_tensor(boxes_detail['index'])[0]   # [N, 4]
     raw_scores = interpreter.get_tensor(scores_detail['index'])[0]  # [N]
@@ -117,6 +122,17 @@ def run_inference(interpreter, input_details, output_details, img_bgr):
     else:
         raw_boxes = raw_boxes.astype(np.float32)
 
+    # Dequantize class IDs
+    if classes_detail is not None:
+        raw_cls = interpreter.get_tensor(classes_detail['index'])[0]  # [N]
+        if classes_detail['dtype'] == np.uint8:
+            sc, zp = classes_detail['quantization']
+            class_ids = (sc * (raw_cls.astype(np.float32) - zp)).round().astype(int)
+        else:
+            class_ids = raw_cls.astype(int)
+    else:
+        class_ids = np.zeros(len(scores), dtype=int)  # single-class fallback
+
     # Normalized [ymin, xmin, ymax, xmax] -> pixel [x1, y1, x2, y2]
     h, w = img_bgr.shape[:2]
     boxes_pixel = []
@@ -126,7 +142,7 @@ def run_inference(interpreter, input_details, output_details, img_bgr):
             float(xmax * w), float(ymax * h),
         ])
 
-    return boxes_pixel, scores.tolist()
+    return boxes_pixel, scores.tolist(), class_ids.tolist()
 
 
 def main():
@@ -199,9 +215,13 @@ def main():
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
 
-    boxes, scores = run_inference(interpreter, input_details, output_details, img_bgr)
+    boxes, scores, class_ids = run_inference(interpreter, input_details, output_details, img_bgr)
 
-    candidates = [(b, s) for b, s in zip(boxes, scores) if s >= threshold]
+    # class 0 = cylinder, class 1 = cube — keep only cylinders above threshold
+    candidates = [
+        (b, s) for b, s, c in zip(boxes, scores, class_ids)
+        if s >= threshold and c == 0
+    ]
 
     if not candidates:
         print("FAILURE no_detection", flush=True)

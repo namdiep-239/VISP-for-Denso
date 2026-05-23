@@ -262,7 +262,6 @@ bool gripperClose(serialib *gripper)
 // Saves frame to /tmp/visp_ai_frame.jpg, then spawns detect_cylinder.py as a subprocess.
 // Returns true on success and sets detected_center to vpImagePoint(v, u).
 // Falls back gracefully: caller should call dot.initTracking(I) if this returns false.
-// TODO: retune confidence_threshold in config.json if cylinder model scores differ from cube model.
 // hint: if non-null, script picks the cylinder closest to hint (JOINT mode).
 //       if null,     script picks the highest-confidence cylinder (INIT mode).
 bool detectCylinderWithAI(const vpImage<unsigned char> &I,
