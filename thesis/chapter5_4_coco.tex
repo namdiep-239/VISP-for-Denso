@@ -1,0 +1,219 @@
+%%=============================================================
+%% chapter5_4_coco.tex
+%% Phần 5.4.1 — Kết quả detection model: COCO metrics
+%%
+%% \input vào chapter5_4.tex. Các màu cppblue/pygreen/warnred/orng
+%% phải được định nghĩa trước (xem chapter4_4.tex).
+%%=============================================================
+
+% ----------------------------------------------------------------
+\subsection{Kết quả detection model: COCO metrics}
+\label{subsec:ai3-coco}
+% ----------------------------------------------------------------
+
+Mô hình được đánh giá trên cả validation set và test set độc lập
+theo chuẩn \textbf{COCO evaluation protocol}. Phần này trình bày
+các metric chính và ý nghĩa thực tiễn của chúng trong bối cảnh
+ứng dụng.
+
+% ---- Giải thích IoU ----
+\subsubsection*{Intersection over Union (IoU)}
+
+Tất cả các metric phát hiện đối tượng đều dựa trên chỉ số
+\textbf{IoU} --- thước đo mức độ trùng khớp giữa bounding box
+dự đoán $B_p$ và bounding box thực tế $B_{gt}$:
+
+\[
+  \text{IoU}(B_p, B_{gt})
+  = \frac{|B_p \cap B_{gt}|}{|B_p \cup B_{gt}|}
+  \in [0,\,1]
+\]
+
+IoU = 1 nghĩa là hai hộp hoàn toàn trùng nhau; IoU = 0 nghĩa là
+không có phần giao. Một detection được tính là
+\textit{True Positive} (TP) khi $\text{IoU} \geq \theta$ với ngưỡng
+$\theta$ được định trước; ngược lại tính là \textit{False Positive}
+(FP). Object nào không có detection nào match thì tính là
+\textit{False Negative} (FN).
+
+% ---- Giải thích các metric ----
+\subsubsection*{Các metric COCO}
+
+\paragraph{AP50 (Average Precision tại IoU $\geq$ 0.50).}
+Ngưỡng IoU lỏng nhất thường dùng, tương đương chuẩn PASCAL VOC
+cũ. Một detection được chấp nhận khi bounding box dự đoán có ít
+nhất 50\% diện tích trùng với ground truth. AP50 = \textbf{1.000}
+trên test set có nghĩa là \textit{toàn bộ cylinder đều được phát
+hiện đúng} --- không bỏ sót, không nhầm lẫn --- tại ngưỡng này.
+
+\paragraph{AP75 (Average Precision tại IoU $\geq$ 0.75).}
+Ngưỡng IoU chặt hơn, yêu cầu bounding box dự đoán khớp chính
+xác hơn với ground truth. AP75 = 0.969 (test) cho thấy phần lớn
+detection đều định vị chính xác, chỉ một tỉ lệ nhỏ có box hơi
+lệch so với ground truth. Với ứng dụng khởi tạo tracker, độ
+chính xác vị trí này hoàn toàn đủ: vpDot2 chỉ cần điểm khởi đầu
+trong vùng lân cận của vật thể, không đòi hỏi bounding box
+pixel-perfect.
+
+\paragraph{mAP (mean Average Precision, IoU 0.50:0.95).}
+Đây là metric tổng hợp của COCO: tính trung bình AP tại 10
+ngưỡng IoU từ 0.50 đến 0.95 (bước 0.05), sau đó lấy trung bình
+qua tất cả các lớp đối tượng. Công thức:
+\[
+  \text{mAP}
+  = \frac{1}{|\mathcal{C}|}
+    \sum_{c \in \mathcal{C}}
+    \frac{1}{10}
+    \sum_{\theta \in \{0.50,\,0.55,\,\ldots,\,0.95\}}
+    \text{AP}_{c}(\theta)
+\]
+mAP penalize nặng các model định vị hộp kém chính xác. Đạt
+mAP = \textbf{0.799} với tập dữ liệu nhỏ ($\sim$533 ảnh, 2 lớp)
+là kết quả tốt, phản ánh việc EfficientDet-Lite0 transfer
+learning đủ mạnh để học đặc trưng của hai đối tượng cụ thể này.
+
+\paragraph{AR (Average Recall, maxDets=100).}
+AR đo khả năng \textit{tìm ra} tất cả object trong ảnh, tính trung
+bình qua các IoU threshold từ 0.50 đến 0.95 (tương tự mAP). Tham
+số \texttt{maxDets=100} giới hạn tối đa 100 detection/ảnh --- giới
+hạn này không ảnh hưởng với ảnh chỉ có 1--3 vật thể. AR = 0.856
+(test) thấp hơn AP50 một phần vì nó tính trung bình qua các
+ngưỡng IoU chặt (đến 0.95), không chỉ 0.50.
+
+\paragraph{Precision, Recall, F1-Score.}
+Đây là các metric theo chuẩn PASCAL VOC tại ngưỡng cố định
+IoU = 0.50 và confidence = 0.50:
+\begin{align*}
+  \text{Precision} &= \frac{\text{TP}}{\text{TP}+\text{FP}}
+    &&\text{(trong số detection, bao nhiêu là đúng)} \\[4pt]
+  \text{Recall}    &= \frac{\text{TP}}{\text{TP}+\text{FN}}
+    &&\text{(trong số cylinder, bao nhiêu được tìm thấy)} \\[4pt]
+  \text{F1}        &= \frac{2 \cdot \text{Precision} \cdot \text{Recall}}
+                          {\text{Precision}+\text{Recall}}
+    &&\text{(trung bình điều hoà)}
+\end{align*}
+Precision = \textbf{1.000} và FP = 0 đặc biệt quan trọng với ứng
+dụng robot: tracker sẽ không bao giờ bị dẫn đến vị trí sai bởi
+một false positive. Recall = 0.990 (FN = 1/96) có nghĩa là 1
+cylinder bị bỏ sót trên toàn test set; trong trường hợp này hệ
+thống fallback về click thủ công.
+
+% ---- Kết quả ----
+\subsubsection*{Kết quả}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      ybar, bar width=0.45cm,
+      width=10cm, height=7cm,
+      symbolic x coords={mAP (0.50:0.95), AP50, AP75, AR},
+      xtick=data,
+      x tick label style={font=\small, align=center},
+      ymin=0, ymax=1.15,
+      ylabel={Score},
+      ylabel style={font=\small},
+      legend style={at={(0.5,1.03)}, anchor=south, legend columns=2, font=\small},
+      legend cell align=left,
+      nodes near coords,
+      every node near coord/.style={font=\scriptsize,
+        /pgf/number format/fixed, /pgf/number format/precision=3},
+      enlarge x limits=0.25,
+      grid=major, grid style={dashed, gray!30},
+      axis line style={gray!60},
+    ]
+    \addplot[fill=cppblue!70, draw=cppblue!90] coordinates {
+      (mAP (0.50:0.95), 0.791)
+      (AP50, 0.990)
+      (AP75, 0.990)
+      (AR,   0.869)
+    };
+    \addplot[fill=orng!80, draw=orng!90] coordinates {
+      (mAP (0.50:0.95), 0.799)
+      (AP50, 1.000)
+      (AP75, 0.969)
+      (AR,   0.856)
+    };
+    \legend{Validation, Test}
+    \end{axis}
+  \end{tikzpicture}
+  \caption{COCO metrics trên validation và test set.
+           AP50 = 1.000 trên test cho thấy 100\% cylinder được
+           phát hiện đúng tại ngưỡng IoU lỏng lẻ (50\%).
+           mAP tổng hợp qua 10 ngưỡng IoU từ 0.50 đến 0.95.}
+  \label{fig:ai3-coco}
+\end{figure}
+
+\begin{table}[htbp]
+  \centering
+  \caption{COCO metrics và detection report trên test set}
+  \label{tab:ai3-metrics}
+  \small
+  \begin{tabular}{lcc}
+    \toprule
+    \textbf{Metric}                    & \textbf{Validation} & \textbf{Test} \\
+    \midrule
+    mAP (IoU 0.50:0.95)               & 0.791               & \textbf{0.799} \\
+    AP50 (IoU $\geq$ 0.50)            & 0.990               & \textbf{1.000} \\
+    AP75 (IoU $\geq$ 0.75)            & 0.990               & 0.969 \\
+    AR (maxDets=100)                   & 0.869               & 0.856 \\
+    \midrule
+    Precision (IoU=0.50, conf=0.50)    & ---                 & \textbf{1.000} \\
+    Recall                             & ---                 & 0.990 \\
+    F1-Score                           & ---                 & \textbf{0.995} \\
+    TP / FP / FN                       & ---                 & 95 / 0 / 1 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      ybar, bar width=0.55cm,
+      width=8.5cm, height=6cm,
+      symbolic x coords={Precision, Recall, F1-Score},
+      xtick=data,
+      x tick label style={font=\small},
+      ymin=0.96, ymax=1.04,
+      ylabel={Score},
+      ylabel style={font=\small},
+      nodes near coords,
+      every node near coord/.style={font=\small,
+        /pgf/number format/fixed, /pgf/number format/precision=3},
+      enlarge x limits=0.3,
+      grid=major, grid style={dashed, gray!30},
+    ]
+    \addplot[fill=pygreen!65, draw=pygreen!80] coordinates {
+      (Precision, 1.000)
+      (Recall,    0.990)
+      (F1-Score,  0.995)
+    };
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Precision, Recall và F1-Score trên test set
+           (PASCAL VOC protocol, IoU$\geq$0.50, conf$\geq$0.50,
+           chỉ lớp cylinder). Precision = 1.000 đồng nghĩa FP = 0:
+           không có lần nào tracker bị khởi tạo sai vị trí.}
+  \label{fig:ai3-prf}
+\end{figure}
+
+% ---- Nhận xét tổng hợp ----
+\subsubsection*{Nhận xét}
+
+Kết quả quan trọng nhất với ứng dụng này là \textbf{Precision =
+1.000} (FP = 0): trong toàn bộ test set không có lần nào mô hình
+nhầm một vật thể khác thành cylinder. Đây là tính chất trực tiếp
+đảm bảo an toàn --- robot sẽ không bao giờ servo về một điểm sai.
+Recall = 0.990 (FN = 1) cho thấy chỉ 1 cylinder bị bỏ sót, trường
+hợp này được xử lý bởi fallback click thủ công.
+
+Sự chênh lệch nhẹ giữa AP50 (1.000) và AP75 (0.969) cho biết hầu
+hết detection định vị đúng trên 75\% diện tích nhưng một số hộp
+vẫn còn lệch nhẹ --- không đáng lo vì vpDot2 chỉ cần
+\textit{tâm} của cylinder làm điểm khởi đầu, không cần toàn bộ
+hộp.
+
+Chênh lệch nhỏ giữa validation và test (mAP: 0.791 vs 0.799;
+AR: 0.869 vs 0.856) cho thấy mô hình không bị overfit --- kết quả
+trên tập chưa thấy không thua kém tập đã dùng để chọn hyperparameter.
