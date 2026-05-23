@@ -461,7 +461,7 @@ dot.initTracking(I, detected_center);  // khởi tạo vpDot2
                text width=2.3cm, align=center, minimum height=1.0cm, font=\small},
     ai/.style={st, fill=pygreen!10, draw=pygreen!60},
     arr/.style={->, >=Stealth, thick},
-    lbl/.style={font=\scriptsize, text=gray!70},
+    lbl/.style={font=\scriptsize, text=gray!70, align=center},
   ]
 
   \node[st]  (pre)  {PREINIT\\{\scriptsize home pose}};
@@ -484,7 +484,7 @@ dot.initTracking(I, detected_center);  // khởi tạo vpDot2
 
   \draw[arr, warnred!70, dashed]
         (jnt.south) -- (rec.north)
-        node[midway, right, font=\scriptsize, text=warnred!70]
+        node[midway, right, font=\scriptsize, text=warnred!70, align=left]
         {vpTracking-\\Exception};
   \draw[arr, pygreen!70, dashed]
         (rec.west) to[out=180,in=225,looseness=1.2] (jnt.south west)
