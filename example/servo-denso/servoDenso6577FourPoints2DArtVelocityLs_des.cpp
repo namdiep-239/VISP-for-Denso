@@ -258,6 +258,84 @@ bool gripperClose(serialib *gripper)
   }
   return false;
 }
+
+bool loadCameraParameters(const std::string &filename,
+                          vpCameraParameters &cam)
+{
+  std::ifstream file(filename);
+
+  if (!file.is_open()) {
+    std::cerr << "Cannot open file: " << filename << std::endl;
+    return false;
+  }
+
+  std::string line;
+
+  double fx = 0.0;
+  double fy = 0.0;
+  double cx = 0.0;
+  double cy = 0.0;
+
+  double k1 = 0.0;
+  // ===== Read "intrinsic:" =====
+  while (std::getline(file, line)) {
+
+    if (line.find("intrinsic:") != std::string::npos) {
+
+        // Row 1
+      std::getline(file, line);
+      std::stringstream ss1(line);
+
+      double temp;
+      ss1 >> fx >> temp >> cx;
+
+      // Row 2
+      std::getline(file, line);
+      std::stringstream ss2(line);
+
+      ss2 >> temp >> fy >> cy;
+
+      // Row 3 (ignored)
+      std::getline(file, line);
+
+      break;
+    }
+  }
+
+  // ===== Read "distortion:" =====
+  while (std::getline(file, line)) {
+
+    if (line.find("distortion:") != std::string::npos) {
+
+      std::getline(file, line);
+
+      std::stringstream ss(line);
+
+      ss >> k1;
+
+      break;
+    }
+  }
+
+  file.close();
+
+  // ===== OpenCV -> ViSP =====
+  double kud = k1;
+  double kdu = -k1;
+
+  cam.initPersProjWithDistortion(
+      fx,
+      fy,
+      cx,
+      cy,
+      kud,
+      kdu
+  );
+
+
+  return true;
+}
+
 // Run Python AI detection on the current frame.
 // Saves frame to /tmp/visp_ai_frame.jpg, then spawns detect_cylinder.py as a subprocess.
 // Returns true on success and sets detected_center to vpImagePoint(v, u).
@@ -379,30 +457,23 @@ int main()
   // ========================
   // Load intrinsic camera
   // ========================
-  vpCameraParameters cam;
-  vpXmlParserCamera parser;
-  if (!vpIoTools::checkFilename(opt_intrinsic_file)) {
-    std::cout << "Camera parameters file " << opt_intrinsic_file << " doesn't exist." << std::endl;
-    std::cout << "Use --help option to see how to set its location..." << std::endl;
+  vpCameraParameters cam_left, cam_right;
+
+  if (!loadCameraParameters(
+    "camera_parameters/left_intrinsics.dat",
+    cam_left)) {
     return EXIT_FAILURE;
   }
-  if (parser.parse(cam, opt_intrinsic_file, opt_camera_name, vpCameraParameters::perspectiveProjWithDistortion) !=
-    vpXmlParserCamera::SEQUENCE_OK) {
-    std::cout << "Unable to parse parameters with distortion for camera \"" << opt_camera_name << "\" from "
-      << opt_intrinsic_file << " file" << std::endl;
-    std::cout << "Attempt to find parameters without distortion" << std::endl;
 
-    if (parser.parse(cam, opt_intrinsic_file, opt_camera_name,
-                     vpCameraParameters::perspectiveProjWithoutDistortion) != vpXmlParserCamera::SEQUENCE_OK) {
-      std::cout << "Unable to parse parameters without distortion for camera \"" << opt_camera_name << "\" from "
-        << opt_intrinsic_file << " file" << std::endl;
-      return EXIT_FAILURE;
-    }
+  if (!loadCameraParameters(
+    "camera_parameters/right_intrinsics.dat",
+    cam_right)) {
+    return EXIT_FAILURE;
   }
 
-  // ========================
-  // Load extrinsic eMc
-  // ========================
+// ========================
+// Load extrinsic eMc
+// ========================
   vpPoseVector e_P_c;
   if (!opt_eMc_filename.empty()) {
     e_P_c.loadYAML(opt_eMc_filename, e_P_c);
