@@ -198,6 +198,28 @@ thống fallback về click thủ công.
   \label{fig:ai3-prf}
 \end{figure}
 
+% ---- Ví dụ detection định tính ----
+\subsubsection*{Ví dụ detection định tính}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=\textwidth]{thesis/figures/sample_detections}
+  \caption{Mười hai ảnh mẫu từ tập test, bao quát toàn bộ 5 loại
+           cảnh: chỉ cube, 1 cylinder, 2 cylinders, 3 cylinders, và
+           hỗn hợp 2--3 cube + cylinder.
+           \textcolor{red}{\textbf{Hộp đỏ}} = cylinder được mô hình
+           dự đoán (cylinder prediction);
+           \textcolor{orange}{\textbf{Hộp cam}} = cube được mô hình
+           dự đoán (cube prediction);
+           \textcolor{green!55!black}{\textbf{- - -}} = ground truth
+           cylinder;
+           \textcolor{blue}{\textbf{- - -}} = ground truth cube.
+           Mô hình phát hiện đúng tất cả cylinder (AP50 = 1.000),
+           phân biệt đúng cube và cylinder trong các cảnh hỗn hợp,
+           và không nhầm cube thành cylinder (FP = 0).}
+  \label{fig:ai3-samples}
+\end{figure}
+
 % ---- Nhận xét tổng hợp ----
 \subsubsection*{Nhận xét}
 

@@ -26,92 +26,15 @@
 
 
 % ----------------------------------------------------------------
-\subsection{Kết quả tích hợp hệ thống}
-\label{subsec:ai3-integration}
-% ----------------------------------------------------------------
-
-\begin{table}[htbp]
-  \centering
-  \caption{So sánh khả năng trước và sau khi tích hợp AI}
-  \label{tab:ai3-comparison}
-  \small
-  \begin{tabular}{lll}
-    \toprule
-    \textbf{Tiêu chí}              & \textbf{Hệ thống gốc} & \textbf{Sau cải tiến} \\
-    \midrule
-    Init mỗi chu kỳ              & Click thủ công       & Tự động (AI) \\
-    Tỷ lệ init thành công      & 100\% (manual)      & $\sim$99.5\% (AI) \\
-    Fallback khi AI thất bại   & Không có             & Click thủ công \\
-    Tracking trong JOINT        & vpDot2              & vpDot2 (giữ nguyên) \\
-    Phục hồi khi mất tracking   & Reset toàn bộ       & AI re-init vpDot2 \\
-    Chạy không giám sát        & Không               & Có \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-Một điểm cần nhấn mạnh: cơ chế tracking trong JOINT
-\textbf{hoàn toàn không thay đổi} --- vpDot2 vẫn chạy
-mỗi frame như cũ. AI chỉ can thiệp ở đầu chu kỳ
-(thay click thủ công) và khi có exception (thay reset
-toàn bộ). Latency của AI ($\sim$100--600~ms/lần gọi)
-không ảnh hưởng đến servo loop vì nó chỉ xảy ra
-thỉnh thoảng --- không phải mỗi frame.
-
-
-% ----------------------------------------------------------------
-\subsection{Phân tích latency: địa điểm sử dụng và chi phí thực tế}
+\subsection{Phân tích latency inference}
 \label{subsec:ai3-latency}
 % ----------------------------------------------------------------
 
-Về mặt latency, điều quan trọng nhất là xác định
-\textbf{khi nào AI được gọi} --- vì mỗi lần gọi sinh ra
-một Python process mới qua \texttt{popen()}, chi phí không
-nhỏ.
-
-\begin{figure}[htbp]
-  \centering
-  \begin{tikzpicture}[
-    node distance=0.55cm and 1.2cm,
-    ev/.style={draw, rounded corners=3pt, fill=gray!8, draw=gray!50,
-               text width=4.8cm, align=left, minimum height=0.85cm,
-               font=\small, inner sep=7pt},
-    ai/.style={ev, fill=pygreen!10, draw=pygreen!55},
-    dot/.style={ev, fill=cppblue!10, draw=cppblue!55},
-    arr/.style={->, >=Stealth, thick, gray!60},
-    lbl/.style={font=\scriptsize, text=gray!70},
-  ]
-
-  \node[ev]  (e1) {PREINIT: robot $\to$ home pose};
-  \node[ai,  below=of e1] (e2)
-        {\textbf{AI gọi lần 1:}~\texttt{detectCylinderWithAI()}\\{\scriptsize $\sim$200--600\,ms --- init vpDot2}};
-  \node[dot, below=of e2] (e3)
-        {JOINT: vpDot2.track() mỗi frame\\{\scriptsize $\sim$1--5\,ms/frame, liên tục}};
-  \node[ai, below=of e3, dashed, draw=pygreen!40, fill=pygreen!5] (e4)
-        {\textbf{AI gọi (nếu cần):}~khi \texttt{vpTrackingException}\\{\scriptsize $\sim$200--600\,ms --- re-init vpDot2}};
-  \node[dot, below=of e4] (e5)
-        {JOINT tiếp tục: vpDot2.track()\\{\scriptsize $\sim$1--5\,ms/frame}};
-  \node[ev, below=of e5] (e6)
-        {APPROACH $\to$ GRIPPER $\to$ CLASSIFIED};
-
-  \draw[arr](e1)--(e2);
-  \draw[arr](e2)--(e3);
-  \draw[arr, dashed](e3)--(e4) node[lbl,right,midway]{exception\\(nếu xảy ra)};
-  \draw[arr](e4)--(e5);
-  \draw[arr](e5)--(e6);
-
-  %% Annotation: AI chỉ xảy ra ở 2 điểm
-  \node[font=\scriptsize\itshape, text=pygreen!70, right=0.3cm of e2]
-       {$\leftarrow$ 1 lần/chu kỳ};
-  \node[font=\scriptsize\itshape, text=pygreen!55, right=0.3cm of e4]
-       {$\leftarrow$ chỉ khi exception};
-
-  \end{tikzpicture}
-  \caption{Tần suất gọi AI trong một chu kỳ điều khiển.
-           AI chỉ xảy ra tối đa 2 lần/chu kỳ: (1)~khởi tạo
-           ở đầu, (2)~khi vpDot2 báo lỗi. vpDot2 đảm nhận
-           tracking liên tục với latency 1--5\,ms/frame.}
-  \label{fig:ai3-timing}
-\end{figure}
+Hàm \texttt{detectCylinderWithAI()} sinh một Python subprocess
+mới qua \texttt{popen()} mỗi lần gọi. Bảng~\ref{tab:ai3-latency}
+và Hình~\ref{fig:ai3-latency} phân tích thành phần chi phí thời
+gian trên hai cấu hình phần cứng: CPU thông thường và Google
+Coral EdgeTPU.
 
 \begin{figure}[htbp]
   \centering
@@ -120,10 +43,7 @@ nhỏ.
       xbar stacked,
       bar width=0.55cm,
       width=11cm, height=5.0cm,
-      symbolic y coords={
-        {EdgeTPU (gọi khi cần)},
-        {CPU (gọi khi cần)}
-      },
+      symbolic y coords={EdgeTPU, CPU},
       ytick=data,
       y tick label style={align=right, font=\small},
       xlabel={Thời gian (ms) mỗi lần gọi AI},
@@ -137,28 +57,29 @@ nhỏ.
     ]
     %% I/O | Inference | Model load | Python startup
     \addplot[fill=gray!40, draw=gray!60] coordinates {
-      (10, {CPU (gọi khi cần)})
-      (10, {EdgeTPU (gọi khi cần)})
+      (10, CPU)
+      (10, EdgeTPU)
     };
     \addplot[fill=warnred!55, draw=warnred!70] coordinates {
-      (150, {CPU (gọi khi cần)})
-      (10,  {EdgeTPU (gọi khi cần)})
+      (150, CPU)
+      (10,  EdgeTPU)
     };
     \addplot[fill=orng!65, draw=orng!80] coordinates {
-      (100, {CPU (gọi khi cần)})
-      (50,  {EdgeTPU (gọi khi cần)})
+      (100, CPU)
+      (50,  EdgeTPU)
     };
     \addplot[fill=cppblue!55, draw=cppblue!70] coordinates {
-      (350, {CPU (gọi khi cần)})
-      (350, {EdgeTPU (gọi khi cần)})
+      (350, CPU)
+      (350, EdgeTPU)
     };
     \legend{I/O (JPEG save/read), Inference, Model load, Python startup}
     \end{axis}
   \end{tikzpicture}
-  \caption{Phân tích thành phần latency mỗi lần gọi AI detection.
-           Python startup ($\sim$350\,ms) chiếm phần lớn overhead.
-           Do AI chỉ được gọi thỉnh thoảng (không phải một lần/frame),
-           latency này không cản trở servo loop.}
+  \caption{Thành phần latency mỗi lần gọi \texttt{detectCylinderWithAI()}.
+           Python startup ($\sim$350\,ms) chiếm phần lớn overhead
+           trên cả hai cấu hình do subprocess được khởi tạo mới
+           mỗi lần. Inference thực sự chỉ mất $\sim$100--200\,ms
+           (CPU) hoặc $\sim$4--15\,ms (EdgeTPU).}
   \label{fig:ai3-latency}
 \end{figure}
 
@@ -177,16 +98,18 @@ nhỏ.
     I/O (JPEG)                & $\sim$10\,ms       & $\sim$10\,ms \\
     \midrule
     \textbf{Tổng / lần gọi}  & $\sim$560--660\,ms & $\sim$415--425\,ms \\
-    Tần suất gọi            & \multicolumn{2}{c}{1 lần/chu kỳ (+ khi vpDot2 fail)} \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-Vì AI chỉ được gọi \textbf{một lần mỗi chu kỳ} (tại home pose,
-trước khi servo bắt đầu) và thỉnh thoảng khi vpDot2 bị mất
-tracking, tổng latency 500--660\,ms/lần gọi không cản trở
-vòng servo. vpDot2 vẫn chạy $\sim$1--5\,ms/frame với tần
-suất đầy đủ trong suốt giai đoạn di chuyển.
+Python startup ($\sim$350\,ms) là bottleneck chung của cả hai
+cấu hình vì subprocess được tạo mới mỗi lần gọi. Inference
+thực sự chỉ chiếm $\sim$150\,ms (CPU) hoặc $\sim$10\,ms (EdgeTPU)
+--- nhanh hơn $\sim$15 lần nhờ phần cứng tăng tốc. Tổng latency
+giảm từ $\sim$560--660\,ms (CPU) xuống $\sim$415--425\,ms (EdgeTPU),
+tức $\sim$35\% nhanh hơn. Bottleneck Python startup có thể loại
+bỏ bằng cách giữ process tồn tại (persistent subprocess hoặc
+socket-based IPC) nếu latency trở thành yêu cầu quan trọng.
 
 \smallskip
 \noindent\textit{\small
