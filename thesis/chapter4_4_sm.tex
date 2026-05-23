@@ -1,0 +1,152 @@
+%%=============================================================
+%% chapter4_4_sm.tex
+%% Phần 4.4.5 — State machine và luồng điều khiển
+%%
+%% \input vào chapter4_4.tex (hoặc trực tiếp vào main.tex sau
+%% chapter4_4.tex). Các màu cppblue/pygreen/warnred/orng phải
+%% được định nghĩa trước (xem chapter4_4.tex).
+%%=============================================================
+
+% ----------------------------------------------------------------
+\subsection{State machine và luồng điều khiển}
+\label{subsec:ai3-sm}
+% ----------------------------------------------------------------
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}[
+    node distance=1.0cm and 2.0cm,
+    st/.style={draw, rounded corners=4pt, fill=cppblue!10, draw=cppblue!55,
+               text width=2.3cm, align=center, minimum height=1.0cm, font=\small},
+    ai/.style={st, fill=pygreen!10, draw=pygreen!60},
+    arr/.style={->, >=Stealth, thick},
+    lbl/.style={font=\scriptsize, text=gray!70, align=center},
+  ]
+
+  \node[st]  (pre)  {PREINIT\\{\scriptsize home pose}};
+  \node[ai,  right=of pre]  (ini)  {INIT\\{\scriptsize AI $\to$ init\\vpDot2}};
+  \node[st,  right=of ini]  (jnt)  {JOINT\\{\scriptsize vpDot2\\tracking}};
+  \node[st,  right=of jnt]  (app)  {APPROACH\\{\scriptsize chờ RC5}};
+  \node[st,  below=1.8cm of app]   (grp)  {GRIPPER\\{\scriptsize đóng\\gripper}};
+  \node[st,  left=of grp]          (cls)  {CLASSIFIED\\{\scriptsize vận\\chuyển}};
+
+  \draw[arr](pre)--(ini)  node[lbl,above,midway]{home\\reached};
+  \draw[arr](ini)--(jnt)  node[lbl,above,midway]{vpDot2\\init ok};
+  \draw[arr](jnt)--(app)  node[lbl,above,midway]{$|e|<5{\times}10^{-3}$};
+  \draw[arr](app)--(grp)  node[lbl,right,midway]{RC5\\signal};
+  \draw[arr](grp)--(cls)  node[lbl,below,midway]{grasped};
+  \draw[arr](cls.west) to[out=180,in=270,looseness=0.8] (pre.south)
+        node[lbl,left,pos=0.5]{cycle\\restart};
+
+  \node[ai, below=1.2cm of jnt] (rec)
+        {AI re-init\\{\scriptsize dot.initTracking\\(I, ai\_hint)}};
+
+  \draw[arr, warnred!70, dashed]
+        (jnt.south) -- (rec.north)
+        node[midway, right, font=\scriptsize, text=warnred!70, align=left]
+        {vpTracking-\\Exception};
+  \draw[arr, pygreen!70, dashed]
+        (rec.west) to[out=180,in=225,looseness=1.2] (jnt.south west)
+        node[midway, left, font=\scriptsize, text=pygreen!70]
+        {init xong};
+
+  \draw[arr, warnred!70, dashed]
+        (ini.south) -- ++(0,-0.7)
+        node[below, font=\scriptsize, text=warnred]
+        {fallback: click thủ công};
+
+  \end{tikzpicture}
+  \caption{State machine với vai trò rõ ràng: AI (xanh lá) cung cấp
+           vị trí khởi đầu cho vpDot2 trong INIT, và re-init tracker khi
+           vpDot2 báo \texttt{vpTrackingException}. vpDot2 là
+           cơ chế tracking chính trong JOINT.}
+  \label{fig:ai3-sm}
+\end{figure}
+
+\paragraph{PREINIT.}
+Robot gửi lệnh joint position về home pose
+$[0^\circ, 0^\circ, 90^\circ, 0^\circ, 90^\circ, 0^\circ]$.
+Đây là tư thế chuẩn để camera có tầm nhìn tốt nhất xuống bàn làm
+việc. Servo task được cấu hình với interaction matrix Desired
+($\mathbf{L}_{s^*}$), pseudo-inverse, gain $\lambda=0.4$.
+
+\paragraph{INIT.}
+Chờ robot và gripper báo sẵn sàng. Khi đạt, gọi
+\texttt{detectCylinderWithAI()} không có hint để lấy vị trí
+cylinder, rồi khởi tạo blob tracker:
+\begin{lstlisting}[language=C++]
+vpImagePoint ai_hint;
+if (detectCylinderWithAI(I, ai_hint)) {
+    dot.initTracking(I, ai_hint);  // AI-guided init
+} else {
+    dot.initTracking(I);           // fallback: click thu cong
+}
+cog = dot.getCog();
+vpFeatureBuilder::create(p, cam, dot);
+\end{lstlisting}
+
+Nếu AI thành công, tracker được khởi tạo tự động ngay tại tọa độ
+pixel mà AI phát hiện. Nếu AI thất bại (timeout 3\,s hoặc không
+tìm thấy cylinder), hệ thống rơi vào fallback yêu cầu người vận
+hành click thủ công --- giống hệ thống ban đầu.
+
+\paragraph{JOINT.}
+vpDot2 chạy mỗi frame camera để bám theo cylinder:
+\begin{lstlisting}[language=C++]
+try {
+    dot.track(I);           // vpDot2: nhanh, per-frame
+    cog = dot.getCog();
+} catch (const vpTrackingException &e) {
+    // Tracking that bai --- goi AI de re-init
+    vpImagePoint ai_hint;
+    if (detectCylinderWithAI(I, ai_hint)) {
+        dot.initTracking(I, ai_hint);
+    } else {
+        dot.initTracking(I);  // fallback click
+    }
+    cog = dot.getCog();
+    vpFeatureBuilder::create(p, cam, dot);
+}
+vpFeatureBuilder::create(p, cam, dot);
+// ... compute control law, send joint velocities
+\end{lstlisting}
+
+Mỗi vòng lặp, visual feature error được tính là:
+\[
+  e_x = x - x^*, \quad e_y = y - y^*
+\]
+trong đó $(x,y)$ là tọa độ cylinder hiện tại trong không gian ảnh
+normalized (đơn vị không thứ nguyên, thu được qua phép chiếu
+$x = (u - c_x)/f_x$), còn $(x^*, y^*) = (0, 0)$ là vị trí mong
+muốn --- tâm ảnh. Ngưỡng hội tụ $5{\times}10^{-3}$ tương đương
+khoảng $2$--$3$ pixel với thông số camera hiện tại, đủ chính xác
+để gripper tiếp cận đúng vị trí cylinder.
+
+Khi cả hai điều kiện $|e_x| < 5{\times}10^{-3}$ và
+$|e_y| < 5{\times}10^{-3}$ đồng thời thỏa mãn, vòng lặp servo
+dừng lại và hệ thống gửi chuỗi \texttt{"OKE\textbackslash r"} qua
+cổng UART đến RC5 controller --- đây là tín hiệu thông báo
+\textit{``cylinder đã được căn giữa, robot sẵn sàng để tiếp
+cận''}.
+
+\paragraph{APPROACH.}
+Sau khi nhận được \texttt{"OKE\textbackslash r"}, RC5 controller
+điều khiển cơ cấu hạ thấp đầu công tác xuống phía cylinder.
+Trạng thái APPROACH trên C++ chỉ đơn giản là \textbf{chờ} ---
+vòng lặp đọc UART và block cho đến khi RC5 gửi tín hiệu xác nhận
+hoàn thành hành trình hạ (tín hiệu ``approach done''). Trong thời
+gian này robot giữ nguyên joint position, camera vẫn nhìn thẳng
+vào cylinder.
+
+\paragraph{GRIPPER.}
+RC5 kích hoạt đóng gripper quanh thân cylinder. Khi cảm biến
+lực/vị trí xác nhận gripper đã kẹp chắc, RC5 gửi tín hiệu
+``grasped'' lên C++, và hệ thống chuyển sang trạng thái
+CLASSIFIED.
+
+\paragraph{CLASSIFIED.}
+Cylinder đã được gắp. Robot thực hiện hành trình vận chuyển
+(joint trajectory) đến vị trí đặt xuống định trước. Sau khi đặt
+xong và gripper mở ra, hệ thống quay lại PREINIT để bắt đầu
+chu kỳ mới --- toàn bộ quá trình lại được thực hiện tự động mà
+không cần can thiệp của người vận hành.
