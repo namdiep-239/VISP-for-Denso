@@ -86,9 +86,7 @@
 // + Điều khiển gripper qua UART (JSON)
 // =============================================================
 using json = nlohmann::json;
-// =============================================================
-// STATE MACHINE của hệ thống
-// =============================================================
+
 enum ROBOT_STATE
 {
   PREINIT,     // Đưa robot về pose ban đầu
@@ -105,9 +103,7 @@ enum GripperState
   OPENED,
   INIT_GRIPPER
 };
-// =============================================================
-// Gửi lệnh xuống gripper qua UART
-// =============================================================
+
 void gripperFlush(serialib *gripper)
 {
   char c;
@@ -124,11 +120,7 @@ bool gripperSendCommand(serialib *gripper, std::string command)
   );
 
 }
-// =============================================================
-// Nhận dữ liệu từ gripper
-// Format: JSON kết thúc bằng '\r'
-// Ví dụ: {"T":1051,"load":-120}\r
-// =============================================================
+
 bool gripperReceiveBuffer(serialib *gripper, char *buffer)
 {
   int idx = 0;
@@ -175,9 +167,7 @@ bool gripperReceiveBuffer(serialib *gripper, char *buffer)
   }
   return false;
 }
-// =============================================================
-// Gửi request hỏi trạng thái gripper
-// =============================================================
+
 bool gripperStatusRequest(serialib *gripper)
 {
   json object = { {"T", 105} };
@@ -185,9 +175,7 @@ bool gripperStatusRequest(serialib *gripper)
 
   return gripperSendCommand(gripper, command);
 }
-// =============================================================
-// MỞ gripper
-// =============================================================
+
 bool gripperOpen(serialib *gripper)
 {
   char buffer[256];
@@ -222,9 +210,7 @@ bool gripperOpen(serialib *gripper)
   }
   return false;
 }
-// =============================================================
-// ĐÓNG gripper
-// =============================================================
+
 bool gripperClose(serialib *gripper)
 {
   char buffer[256];
@@ -426,7 +412,7 @@ bool detectCylinderWithAI(const vpImage<unsigned char> &I,
     std::cerr << "[AI] " << result;
   return false;
 }
-int main()
+int main(int argc, char **argv)
 {
   // ========================
   // Cấu hình hệ thống
@@ -435,9 +421,31 @@ int main()
   int opt_device = 2;
   bool opt_display = true;
   std::string opt_camera_name = "Camera";
-  std::string opt_intrinsic_file = "camera.xml";
   std::string opt_eMc_filename = "rc5_ePc.yaml";
+  std::string opt_camera_folder = ".";
   GripperState gripperStatus = INIT_GRIPPER;
+
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--no-display") {
+      opt_display = false;
+    }
+    else if (std::string(argv[i]) == "--device" && i + 1 < argc) {
+      opt_device = std::atoi(argv[++i]);
+    }
+    else if (std::string(argv[i]) == "--eMc" && i + 1 < argc) {
+      opt_eMc_filename = std::string(argv[++i]);
+    }
+    else if (std::string(argv[i]) == "--intrinsic-folder" && i + 1 < argc) {
+      opt_camera_folder = std::string(argv[++i]);
+    }
+    else {
+      std::cout << "\nERROR" << std::endl
+        << std::string(argv[i]) << " command line option is not supported." << std::endl
+        << "Use " << std::string(argv[0]) << " --help" << std::endl
+        << std::endl;
+      return EXIT_FAILURE;
+    }
+  }
   // ========================
   // Khởi tạo gripper (UART)
   // ========================
@@ -458,15 +466,17 @@ int main()
   // Load intrinsic camera
   // ========================
   vpCameraParameters cam_left, cam_right;
+  std::string camera_left_folder = opt_camera_folder + "/camera_left.dat";
+  std::string camera_right_folder = opt_camera_folder + "/camera_right.dat";
 
   if (!loadCameraParameters(
-    "camera_parameters/left_intrinsics.dat",
+    camera_left_folder,
     cam_left)) {
     return EXIT_FAILURE;
   }
 
   if (!loadCameraParameters(
-    "camera_parameters/right_intrinsics.dat",
+    camera_right_folder,
     cam_right)) {
     return EXIT_FAILURE;
   }
@@ -486,8 +496,16 @@ int main()
   // Display
   // ========================
   vpImage<unsigned char> I;
-  vpDisplayOpenCV *d = nullptr;
-  std::shared_ptr<vpDisplay> display = nullptr;
+  vpImage<unsigned char> I_left;
+  vpImage<unsigned char> I_right;
+
+#if (VISP_CXX_STANDARD >= VISP_CXX_STANDARD_11)
+  std::shared_ptr<vpDisplay> display_left;
+  std::shared_ptr<vpDisplay> display_right;
+#else
+  vpDisplay *display_left = nullptr;
+  vpDisplay *display_right = nullptr;
+#endif
 
   while ((i++ < 60) && !cap.read(frame)) {
   } // warm up camera by skiping unread frames
@@ -495,16 +513,18 @@ int main()
   cap >> frame;
   vpImageConvert::convert(frame, I);
 
-  if ((opt_display) && d == nullptr) {
-    d = new vpDisplayOpenCV(I);
-  }
-  display = vpDisplayFactory::createDisplay(I, 10, 10, "Current image");
-  vpDisplay::display(I);
-  vpDisplay::flush(I);
+  display_left = vpDisplayFactory::createDisplay(I_left, 10, 10, "Current image");
+  display_right = vpDisplayFactory::createDisplay(I_right, 10, 10, "Current image");
 
-  // ========================
-  // Khởi tạo robot Denso
-  // ========================
+  vpDisplay::display(I_left);
+  vpDisplay::display(I_right);
+
+  vpDisplay::flush(I_left);
+  vpDisplay::flush(I_right);
+
+ // ========================
+ // Khởi tạo robot Denso
+ // ========================
   vpRobotDenso6577 robot;
   robot.init(); // param: redefine tool and camera extrinsic parameters for eMC
   robot.set_eMc(e_M_c);
