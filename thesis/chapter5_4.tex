@@ -21,124 +21,8 @@
 
 
 % ----------------------------------------------------------------
-\subsection{Phân tích confidence score: true positive vs false positive}
-\label{subsec:ai3-conf}
+\input{thesis/chapter5_4_conf}
 % ----------------------------------------------------------------
-
-Một yếu tố quan trọng khi chọn ngưỡng confidence là
-khoảng cách phân tách giữa true và false positive. Nếu
-khoảng này hẹp, ngưỡng khó đặt; nếu rộng, hệ thống có
-biên an toàn cao.
-
-\begin{figure}[htbp]
-  \centering
-  \begin{tikzpicture}
-    \begin{axis}[
-      width=11cm, height=6.5cm,
-      xlabel={Confidence score},
-      xmin=0, xmax=1.05,
-      ymin=0.3, ymax=3.3,
-      xtick={0,0.1,...,1.0},
-      ytick=\empty,
-      axis y line=none,
-      x tick label style={font=\small},
-      xlabel style={font=\small},
-      grid=major, grid style={dashed, gray!25},
-      axis line style={gray!60},
-      clip=false,
-    ]
-
-    %% ---- True Positive (cylinder) strip, y=2 ----
-    \addplot[only marks, mark=|, mark size=6pt,
-             mark options={draw=pygreen!70, line width=1.2pt},
-             opacity=0.6]
-    coordinates {
-      (0.29,2)(0.61,2)(0.74,2)
-      (0.82,2)(0.84,2)(0.85,2)(0.86,2)(0.87,2)(0.88,2)
-      (0.89,2)(0.90,2)(0.91,2)(0.92,2)(0.93,2)(0.94,2)
-      (0.95,2)(0.96,2)(0.97,2)(0.98,2)
-    };
-
-    %% ---- False Positive (cube) strip, y=1 ----
-    \addplot[only marks, mark=|, mark size=6pt,
-             mark options={draw=warnred!70, line width=1.2pt},
-             opacity=0.7]
-    coordinates {
-      (0.08,1)(0.13,1)(0.17,1)(0.21,1)
-      (0.25,1)(0.28,1)(0.31,1)(0.33,1)(0.35,1)(0.36,1)
-    };
-
-    %% ---- Row labels inside plot (avoids y-axis truncation) ----
-    \node[font=\small, text=pygreen!80!black, anchor=west]
-         at (axis cs:0.01, 2.38) {True Positive --- cylinder ($n{=}218$ detections)};
-    \node[font=\small, text=warnred!80, anchor=west]
-         at (axis cs:0.01, 0.62) {False Positive --- cube ($n{=}10$, tất cả)};
-
-    %% ---- Threshold line ----
-    \addplot[thick, dashed, draw=gray!70]
-    coordinates {(0.50,0.3)(0.50,3.3)};
-    \node[font=\scriptsize, text=gray!65, rotate=90]
-         at (axis cs:0.525, 1.5) {threshold = 0.50};
-
-    %% ---- Gap annotation: max FP (0.36) to start of main TP cluster (0.70) ----
-    \draw[<->, >=Stealth, thick, gray!55]
-         (axis cs:0.36, 2.72) -- (axis cs:0.70, 2.72);
-    \node[font=\scriptsize, text=gray!65]
-         at (axis cs:0.53, 2.90) {gap = 0.34};
-
-    %% ---- Median TP ----
-    \addplot[only marks, mark=diamond*, mark size=4pt,
-             mark options={draw=pygreen!90, fill=pygreen!55}]
-    coordinates {(0.94, 2)};
-    \node[font=\scriptsize, text=pygreen!80!black, above]
-         at (axis cs:0.94, 2.06) {median 0.94};
-
-    %% ---- Max FP ----
-    \addplot[only marks, mark=diamond*, mark size=4pt,
-             mark options={draw=warnred!80, fill=warnred!50}]
-    coordinates {(0.36, 1)};
-    \node[font=\scriptsize, text=warnred!90, below]
-         at (axis cs:0.36, 0.93) {max 0.36};
-
-    \end{axis}
-  \end{tikzpicture}
-  \caption{Phân tách confidence score: mỗi vạch đứng đại diện
-           một giá trị score phát hiện duy nhất (218 detection
-           TP được biểu diễn qua 19 giá trị đặc trưng do nhiều
-           detection có score trùng nhau). Hàng \textcolor{pygreen!70!black}{xanh lá}
-           = cylinder được nhận dạng đúng (True Positive);
-           hàng \textcolor{warnred}{đỏ} = cube bị nhầm thành
-           cylinder (False Positive). Gap~=~0.34 là khoảng cách
-           từ điểm FP cao nhất (0.36) đến cụm TP chính
-           ($\geq$0.70), trong đó ngưỡng 0.50 nằm an toàn ở
-           giữa.}
-  \label{fig:ai3-conf}
-\end{figure}
-
-\begin{table}[htbp]
-  \centering
-  \caption{Phân tích confidence score (218 cylinder + 10 cube)}
-  \label{tab:ai3-conf}
-  \small
-  \begin{tabular}{lcc}
-    \toprule
-    & \textbf{True Positive (cylinder)} & \textbf{False Positive (cube)} \\
-    \midrule
-    Score range     & 0.29 -- 0.98       & 0.08 -- 0.36 \\
-    Median          & \textbf{0.94}      & --- \\
-    $\geq$0.50      & 99.5\% (217/218)   & \textbf{0/10 (0\%)} \\
-    $\geq$0.70      & 99.1\% (216/218)   & 0/10 (0\%) \\
-    \midrule
-    Gap ph\^an t\'ach & \multicolumn{2}{c}{$0.70 - 0.36 = 0.34$} \\
-    \bottomrule
-  \end{tabular}
-\end{table}
-
-3 outlier có score thấp (0.29, 0.61, 0.74) tương ứng với
-cylinder bị nhìn từ góc bất thường hoặc bị che khuất một
-phần. Ở runtime, các trường hợp này fallback về click thủ
-công --- không ảnh hưởng đến robot và bảo toàn nguyên hành
-vi ban đầu của hệ thống.
 
 
 % ----------------------------------------------------------------
@@ -171,7 +55,7 @@ mỗi frame như cũ. AI chỉ can thiệp ở đầu chu kỳ
 (thay click thủ công) và khi có exception (thay reset
 toàn bộ). Latency của AI ($\sim$100--600~ms/lần gọi)
 không ảnh hưởng đến servo loop vì nó chỉ xảy ra
-từ thựnh thoảng --- không phải mỗi frame.
+thỉnh thoảng --- không phải mỗi frame.
 
 
 % ----------------------------------------------------------------
@@ -273,7 +157,7 @@ nhỏ.
   \end{tikzpicture}
   \caption{Phân tích thành phần latency mỗi lần gọi AI detection.
            Python startup ($\sim$350\,ms) chiếm phần lớn overhead.
-           Do AI chỉ được gọi từ thựnh thoảng (không phải một lần/frame),
+           Do AI chỉ được gọi thỉnh thoảng (không phải một lần/frame),
            latency này không cản trở servo loop.}
   \label{fig:ai3-latency}
 \end{figure}
@@ -308,5 +192,6 @@ suất đầy đủ trong suốt giai đoạn di chuyển.
 \noindent\textit{\small
 Lưu ý về số liệu: COCO metrics lấy từ đánh giá hai lớp
 (cylinder + cube) trên repository huấn luyện. Phân tích
-confidence score lấy từ kiểm tra độc lập trên 218 ảnh
-cylinder và 10 ảnh cube (CPU inference via ai-edge-litert).}
+confidence score lấy từ kiểm tra độc lập trên 96 ảnh test
+(66 ảnh cylinder, 30 ảnh cube) với bộ lọc class\_id đúng
+(CPU inference via ai-edge-litert).}

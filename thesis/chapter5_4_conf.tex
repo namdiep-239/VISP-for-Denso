@@ -1,0 +1,124 @@
+%%=============================================================
+%% chapter5_4_conf.tex
+%% Phần 5.4.2 — Phân tích confidence score
+%%
+%% \input vào chapter5_4.tex. Các màu pygreen/warnred/cppblue
+%% phải được định nghĩa trước (xem chapter4_4.tex).
+%%=============================================================
+
+% ----------------------------------------------------------------
+\subsection{Phân tích confidence score}
+\label{subsec:ai3-conf}
+% ----------------------------------------------------------------
+
+Sau khi áp dụng bộ lọc \texttt{class\_id == 0} (chỉ chấp nhận
+cylinder), toàn bộ false positive bị loại hoàn toàn: FP = 0 trên
+tập test 96 ảnh (66 ảnh cylinder, 30 ảnh cube). Phần này phân
+tích phân bố confidence score của 65 true positive để đánh giá
+biên an toàn so với ngưỡng $\theta = 0.50$.
+
+\begin{figure}[htbp]
+  \centering
+  \begin{tikzpicture}
+    \begin{axis}[
+      width=11cm, height=4.5cm,
+      xlabel={Confidence score},
+      xmin=0, xmax=1.05,
+      ymin=0.3, ymax=2.3,
+      xtick={0,0.1,...,1.0},
+      ytick=\empty,
+      axis y line=none,
+      x tick label style={font=\small},
+      xlabel style={font=\small},
+      grid=major, grid style={dashed, gray!25},
+      axis line style={gray!60},
+      clip=false,
+    ]
+
+    %% ---- True Positive (cylinder) strip, y=1 ----
+    \addplot[only marks, mark=|, mark size=7pt,
+             mark options={draw=pygreen!70, line width=1.3pt},
+             opacity=0.7]
+    coordinates {
+      (0.687,1)(0.7484,1)(0.76,1)(0.783,1)
+      (0.8214,1)(0.829,1)(0.8636,1)(0.8751,1)
+      (0.8828,1)(0.8943,1)(0.8981,1)(0.9058,1)
+      (0.9096,1)(0.9135,1)(0.9173,1)(0.925,1)
+      (0.9288,1)(0.9327,1)(0.9365,1)(0.9403,1)
+      (0.948,1)(0.9519,1)(0.9557,1)(0.9595,1)
+      (0.9634,1)(0.9672,1)(0.9711,1)(0.9749,1)
+    };
+
+    %% ---- Row label ----
+    \node[font=\small, text=pygreen!80!black, anchor=west]
+         at (axis cs:0.01, 1.60)
+         {True Positive --- cylinder ($n{=}65$,\quad FP $= 0$)};
+
+    %% ---- Threshold line ----
+    \addplot[thick, dashed, draw=gray!70]
+    coordinates {(0.50,0.3)(0.50,2.3)};
+    \node[font=\scriptsize, text=gray!65, rotate=90]
+         at (axis cs:0.527, 1.30) {threshold = 0.50};
+
+    %% ---- Margin annotation: threshold (0.50) to min TP (0.687) ----
+    \draw[<->, >=Stealth, thick, gray!55]
+         (axis cs:0.50, 1.84) -- (axis cs:0.687, 1.84);
+    \node[font=\scriptsize, text=gray!65]
+         at (axis cs:0.594, 2.07) {bi\^en = 0.187};
+
+    %% ---- Median TP ----
+    \addplot[only marks, mark=diamond*, mark size=4pt,
+             mark options={draw=pygreen!90, fill=pygreen!55}]
+    coordinates {(0.9365, 1)};
+    \node[font=\scriptsize, text=pygreen!80!black, above]
+         at (axis cs:0.9365, 1.08) {median 0.937};
+
+    \end{axis}
+  \end{tikzpicture}
+  \caption{Phân bố confidence score của 65 true positive (cylinder)
+           sau khi áp dụng bộ lọc \texttt{class\_id == 0}.
+           Mỗi vạch đứng đại diện một giá trị score duy nhất
+           (28 giá trị). FP = 0 --- không có detection nào từ cube
+           vượt qua bộ lọc. Biên an toàn từ min TP (0.687) đến
+           ngưỡng 0.50 là \textbf{0.187}.}
+  \label{fig:ai3-conf}
+\end{figure}
+
+\begin{table}[htbp]
+  \centering
+  \caption{Thống kê confidence score trên tập test
+           (96 ảnh: 66 cylinder + 30 cube)}
+  \label{tab:ai3-conf}
+  \small
+  \begin{tabular}{lc}
+    \toprule
+    \textbf{Thống kê}                              & \textbf{Giá trị} \\
+    \midrule
+    Số TP (cylinder phát hiện đúng)                & 65 \\
+    Score range (TP)                               & 0.687 -- 0.975 \\
+    Median (TP)                                    & \textbf{0.937} \\
+    TP trên ngưỡng $\theta=0.50$                   & \textbf{100\%} (65/65) \\
+    Biên an toàn (min TP $-$ $\theta$)             & $0.687 - 0.50 = \mathbf{0.187}$ \\
+    \midrule
+    Số FP (cube bị nhầm thành cylinder)            & \textbf{0} \\
+    Số FN (cylinder bị bỏ sót)                    & 1 \\
+    Precision / Recall / F1                        & 1.000 / 0.985 / 0.992 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+Phổ TP tập trung dày đặc ở vùng $0.87$--$0.975$: trong 28 giá
+trị score duy nhất, chỉ 4 giá trị nằm dưới 0.82
+($0.687,\;0.748,\;0.76,\;0.783$). Điểm thấp nhất (0.687) tương
+ứng với cylinder bị nhìn từ góc bất thường hoặc điều kiện ánh
+sáng kém, nhưng vẫn cách ngưỡng một biên \textbf{0.187} --- đủ
+rộng để ngưỡng 0.50 không cần điều chỉnh với điều kiện thực
+nghiệm hiện tại. Trường hợp FN duy nhất (1 cylinder bị bỏ sót)
+được xử lý bởi fallback click thủ công.
+
+FP = 0 là kết quả trực tiếp của bộ lọc \texttt{class\_id == 0}:
+mô hình EfficientDet-Lite0 phát hiện cả cylinder lẫn cube, nhưng
+hàm \texttt{detectCylinderWithAI()} chỉ giữ lại detection có
+\texttt{class\_id == 0} trước khi so sánh với ngưỡng confidence.
+Mọi cube (class 1), dù có score cao đến đâu, đều bị loại ở bước
+lọc này --- đảm bảo robot không bao giờ servo về vị trí cube.
