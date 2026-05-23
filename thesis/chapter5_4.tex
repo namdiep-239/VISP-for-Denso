@@ -34,28 +34,24 @@ biên an toàn cao.
   \centering
   \begin{tikzpicture}
     \begin{axis}[
-      width=11cm, height=5.5cm,
+      width=11cm, height=6.5cm,
       xlabel={Confidence score},
-      ylabel={},
       xmin=0, xmax=1.05,
-      ymin=0, ymax=3,
+      ymin=0.3, ymax=3.3,
       xtick={0,0.1,...,1.0},
-      ytick={0.7, 2.0},
-      yticklabels={
-        \small False Positive (cube, $n{=}10$),
-        \small True Positive (cylinder, $n{=}218$)
-      },
-      y tick label style={align=right, font=\small},
+      ytick=\empty,
+      axis y line=none,
       x tick label style={font=\small},
       xlabel style={font=\small},
-      grid=both, grid style={dashed, gray!25},
+      grid=major, grid style={dashed, gray!25},
       axis line style={gray!60},
+      clip=false,
     ]
 
-    %% ---- True Positive (cylinder) ----
-    \addplot[only marks, mark=|, mark size=5pt,
+    %% ---- True Positive (cylinder) strip, y=2 ----
+    \addplot[only marks, mark=|, mark size=6pt,
              mark options={draw=pygreen!70, line width=1.2pt},
-             opacity=0.55]
+             opacity=0.6]
     coordinates {
       (0.29,2)(0.61,2)(0.74,2)
       (0.82,2)(0.84,2)(0.85,2)(0.86,2)(0.87,2)(0.88,2)
@@ -63,50 +59,59 @@ biên an toàn cao.
       (0.95,2)(0.96,2)(0.97,2)(0.98,2)
     };
 
-    %% ---- False Positive (cube) ----
-    \addplot[only marks, mark=|, mark size=5pt,
+    %% ---- False Positive (cube) strip, y=1 ----
+    \addplot[only marks, mark=|, mark size=6pt,
              mark options={draw=warnred!70, line width=1.2pt},
-             opacity=0.65]
+             opacity=0.7]
     coordinates {
-      (0.08,0.7)(0.13,0.7)(0.17,0.7)(0.21,0.7)
-      (0.25,0.7)(0.28,0.7)(0.31,0.7)(0.33,0.7)(0.35,0.7)(0.36,0.7)
+      (0.08,1)(0.13,1)(0.17,1)(0.21,1)
+      (0.25,1)(0.28,1)(0.31,1)(0.33,1)(0.35,1)(0.36,1)
     };
 
-    %% ---- Threshold line ----
-    \addplot[thick, dashed, draw=gray!80]
-    coordinates {(0.50,0) (0.50,3)};
-    \node[font=\scriptsize, text=gray!80, rotate=90]
-         at (axis cs:0.52, 1.5) {threshold = 0.50};
+    %% ---- Row labels inside plot (avoids y-axis truncation) ----
+    \node[font=\small, text=pygreen!80!black, anchor=west]
+         at (axis cs:0.01, 2.38) {True Positive --- cylinder ($n{=}218$ detections)};
+    \node[font=\small, text=warnred!80, anchor=west]
+         at (axis cs:0.01, 0.62) {False Positive --- cube ($n{=}10$, tất cả)};
 
-    %% ---- Gap annotation ----
-    \draw[->, >=Stealth, thick, gray!60]
-         (axis cs:0.43, 2.55) -- (axis cs:0.50, 2.55);
-    \draw[->, >=Stealth, thick, gray!60]
-         (axis cs:0.43, 2.55) -- (axis cs:0.36, 2.55);
-    \node[font=\scriptsize, text=gray!70]
-         at (axis cs:0.43, 2.72) {gap = 0.34};
+    %% ---- Threshold line ----
+    \addplot[thick, dashed, draw=gray!70]
+    coordinates {(0.50,0.3)(0.50,3.3)};
+    \node[font=\scriptsize, text=gray!65, rotate=90]
+         at (axis cs:0.525, 1.5) {threshold = 0.50};
+
+    %% ---- Gap annotation: max FP (0.36) to start of main TP cluster (0.70) ----
+    \draw[<->, >=Stealth, thick, gray!55]
+         (axis cs:0.36, 2.72) -- (axis cs:0.70, 2.72);
+    \node[font=\scriptsize, text=gray!65]
+         at (axis cs:0.53, 2.90) {gap = 0.34};
 
     %% ---- Median TP ----
     \addplot[only marks, mark=diamond*, mark size=4pt,
              mark options={draw=pygreen!90, fill=pygreen!55}]
     coordinates {(0.94, 2)};
     \node[font=\scriptsize, text=pygreen!80!black, above]
-         at (axis cs:0.94, 2.05) {median 0.94};
+         at (axis cs:0.94, 2.06) {median 0.94};
 
     %% ---- Max FP ----
     \addplot[only marks, mark=diamond*, mark size=4pt,
              mark options={draw=warnred!80, fill=warnred!50}]
-    coordinates {(0.36, 0.7)};
-    \node[font=\scriptsize, text=warnred, below]
-         at (axis cs:0.36, 0.65) {max 0.36};
+    coordinates {(0.36, 1)};
+    \node[font=\scriptsize, text=warnred!90, below]
+         at (axis cs:0.36, 0.93) {max 0.36};
 
     \end{axis}
   \end{tikzpicture}
-  \caption{Phân tách confidence score: true positive (xanh lá)
-           so với false positive (đỏ). Mỗi vạch đưứng đại diện
-           một detection. Ngưỡng 0.50 nằm giữa khoảng gap 0.34,
-           loại bỏ toàn bộ false positive (0/10) trong khi
-           giữ lại 99.5\% true positive.}
+  \caption{Phân tách confidence score: mỗi vạch đứng đại diện
+           một giá trị score phát hiện duy nhất (218 detection
+           TP được biểu diễn qua 19 giá trị đặc trưng do nhiều
+           detection có score trùng nhau). Hàng \textcolor{pygreen!70!black}{xanh lá}
+           = cylinder được nhận dạng đúng (True Positive);
+           hàng \textcolor{warnred}{đỏ} = cube bị nhầm thành
+           cylinder (False Positive). Gap~=~0.34 là khoảng cách
+           từ điểm FP cao nhất (0.36) đến cụm TP chính
+           ($\geq$0.70), trong đó ngưỡng 0.50 nằm an toàn ở
+           giữa.}
   \label{fig:ai3-conf}
 \end{figure}
 
@@ -130,10 +135,10 @@ biên an toàn cao.
 \end{table}
 
 3 outlier có score thấp (0.29, 0.61, 0.74) tương ứng với
-cylinder bị nhìn từ góc bất thường hoặc bị che khuất. Ỡ
-runtime, các trường hợp này fallback về click thủ công ---
-không những không nh hưởng đến robot mà còn bảo toàn
-nư hành vi ban đầu.
+cylinder bị nhìn từ góc bất thường hoặc bị che khuất một
+phần. Ở runtime, các trường hợp này fallback về click thủ
+công --- không ảnh hưởng đến robot và bảo toàn nguyên hành
+vi ban đầu của hệ thống.
 
 
 % ----------------------------------------------------------------
