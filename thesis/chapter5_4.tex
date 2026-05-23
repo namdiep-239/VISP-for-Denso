@@ -26,90 +26,86 @@
 
 
 % ----------------------------------------------------------------
-\subsection{Phân tích latency inference}
+\subsection{So sánh hiệu năng inference: CPU và EdgeTPU}
 \label{subsec:ai3-latency}
 % ----------------------------------------------------------------
 
-Hàm \texttt{detectCylinderWithAI()} sinh một Python subprocess
-mới qua \texttt{popen()} mỗi lần gọi. Bảng~\ref{tab:ai3-latency}
-và Hình~\ref{fig:ai3-latency} phân tích thành phần chi phí thời
-gian trên hai cấu hình phần cứng: CPU thông thường và Google
-Coral EdgeTPU.
+Ba biến thể model TFLite được sinh ra từ cùng một checkpoint
+(Float32, INT8, INT8 EdgeTPU) và được benchmark đồng thời trên
+76 ảnh test (128 cylinder instance) bằng script
+\texttt{compare\_raw\_vs\_tflite.py}. Metric \textbf{avg\_inf\_ms}
+đo thời gian thực thi TFLite model thuần túy (không bao gồm
+khởi động Python hay I/O).
+
+\begin{table}[htbp]
+  \centering
+  \caption{So sánh ba biến thể deployment trên 76 ảnh test
+           (IoU$\geq$0.50, conf$\geq$0.50, 128 cylinder instance)}
+  \label{tab:ai3-latency}
+  \small
+  \begin{tabular}{llrrrr}
+    \toprule
+    \textbf{Model}        & \textbf{Backend}
+      & \textbf{Avg inf (ms)} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
+    \midrule
+    Float32 TFLite        & CPU (benchmark) & 1222 & 1.000 & 0.992 & 0.996 \\
+    INT8 TFLite           & CPU (benchmark) & 1231 & 1.000 & 0.992 & 0.996 \\
+    INT8 EdgeTPU (Coral)  & Coral USB       &   24 & 1.000 & 0.992 & 0.996 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 \begin{figure}[htbp]
   \centering
   \begin{tikzpicture}
     \begin{axis}[
-      xbar stacked,
-      bar width=0.55cm,
-      width=11cm, height=5.0cm,
-      symbolic y coords={EdgeTPU, CPU},
+      xbar, bar width=0.6cm,
+      width=10cm, height=5cm,
+      symbolic y coords={
+        {INT8 EdgeTPU},
+        {INT8 CPU},
+        {Float32 CPU}
+      },
       ytick=data,
-      y tick label style={align=right, font=\small},
-      xlabel={Thời gian (ms) mỗi lần gọi AI},
+      y tick label style={font=\small, align=right},
+      xlabel={Inference time (ms)},
       xlabel style={font=\small},
-      xmin=0, xmax=780,
-      legend style={at={(0.5,-0.28)}, anchor=north,
-                    legend columns=4, font=\scriptsize},
-      legend cell align=left,
+      xmin=0, xmax=1500,
+      nodes near coords,
+      every node near coord/.style={font=\small,
+        /pgf/number format/fixed, /pgf/number format/precision=0},
+      enlarge y limits=0.35,
       grid=major, grid style={dashed, gray!25},
-      enlarge y limits=0.4,
     ]
-    %% I/O | Inference | Model load | Python startup
-    \addplot[fill=gray!40, draw=gray!60] coordinates {
-      (10, CPU)
-      (10, EdgeTPU)
-    };
-    \addplot[fill=warnred!55, draw=warnred!70] coordinates {
-      (150, CPU)
-      (10,  EdgeTPU)
-    };
-    \addplot[fill=orng!65, draw=orng!80] coordinates {
-      (100, CPU)
-      (50,  EdgeTPU)
-    };
     \addplot[fill=cppblue!55, draw=cppblue!70] coordinates {
-      (350, CPU)
-      (350, EdgeTPU)
+      (1222, {Float32 CPU})
+      (1231, {INT8 CPU})
+      (24,   {INT8 EdgeTPU})
     };
-    \legend{I/O (JPEG save/read), Inference, Model load, Python startup}
     \end{axis}
   \end{tikzpicture}
-  \caption{Thành phần latency mỗi lần gọi \texttt{detectCylinderWithAI()}.
-           Python startup ($\sim$350\,ms) chiếm phần lớn overhead
-           trên cả hai cấu hình do subprocess được khởi tạo mới
-           mỗi lần. Inference thực sự chỉ mất $\sim$100--200\,ms
-           (CPU) hoặc $\sim$4--15\,ms (EdgeTPU).}
+  \caption{Inference time trung bình của ba biến thể model (đo bằng
+           \texttt{compare\_raw\_vs\_tflite.py} trên môi trường
+           benchmark). EdgeTPU nhanh hơn CPU khoảng \textbf{50 lần}
+           trong khi giữ nguyên toàn bộ accuracy.}
   \label{fig:ai3-latency}
 \end{figure}
 
-\begin{table}[htbp]
-  \centering
-  \caption{Latency mỗi lần gọi \texttt{detectCylinderWithAI()}}
-  \label{tab:ai3-latency}
-  \small
-  \begin{tabular}{lcc}
-    \toprule
-    \textbf{Thành phần}       & \textbf{CPU}       & \textbf{EdgeTPU} \\
-    \midrule
-    Python startup            & $\sim$350\,ms      & $\sim$350\,ms \\
-    Model load (lần đầu)      & $\sim$100\,ms      & $\sim$50\,ms \\
-    Inference                 & $\sim$100--200\,ms & $\sim$4--15\,ms \\
-    I/O (JPEG)                & $\sim$10\,ms       & $\sim$10\,ms \\
-    \midrule
-    \textbf{Tổng / lần gọi}  & $\sim$560--660\,ms & $\sim$415--425\,ms \\
-    \bottomrule
-  \end{tabular}
-\end{table}
+Hai kết quả nổi bật từ benchmark:
 
-Python startup ($\sim$350\,ms) là bottleneck chung của cả hai
-cấu hình vì subprocess được tạo mới mỗi lần gọi. Inference
-thực sự chỉ chiếm $\sim$150\,ms (CPU) hoặc $\sim$10\,ms (EdgeTPU)
---- nhanh hơn $\sim$15 lần nhờ phần cứng tăng tốc. Tổng latency
-giảm từ $\sim$560--660\,ms (CPU) xuống $\sim$415--425\,ms (EdgeTPU),
-tức $\sim$35\% nhanh hơn. Bottleneck Python startup có thể loại
-bỏ bằng cách giữ process tồn tại (persistent subprocess hoặc
-socket-based IPC) nếu latency trở thành yêu cầu quan trọng.
+\textbf{(1) INT8 quantization không làm giảm accuracy.}
+Ba model có TP, FP, FN hoàn toàn giống nhau (TP = 127, FP = 0,
+FN = 1). Precision = 1.000 và FP = 0 được bảo toàn qua tất cả
+các bước quantization, cho thấy bộ lọc \texttt{class\_id == 0}
+hoạt động đúng bất kể backend hay kiểu số.
+
+\textbf{(2) EdgeTPU tăng tốc $\sim$50 lần.}
+INT8 EdgeTPU inference trung bình 24\,ms so với 1222\,ms của
+Float32 CPU (speedup = $1222/24.5 \approx 49.9\times$).
+Đáng chú ý là INT8 trên CPU không nhanh hơn Float32 (1231\,ms
+vs 1222\,ms, chênh lệch 0.7\%) --- lợi ích của quantization trên
+x86 với TFLite là không đáng kể; tăng tốc thực sự chỉ đến khi
+chạy trên phần cứng chuyên dụng (Coral EdgeTPU).
 
 \smallskip
 \noindent\textit{\small
