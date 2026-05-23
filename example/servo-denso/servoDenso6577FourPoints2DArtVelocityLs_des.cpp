@@ -45,7 +45,8 @@
 
 #include <visp3/core/vpConfig.h>
 #include <visp3/core/vpDebug.h> // Debug trace
-
+#include <opencv2/calib3d.hpp>
+#include <opencv2/highgui/highgui.hpp>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -86,6 +87,87 @@
 // + Điều khiển gripper qua UART (JSON)
 // =============================================================
 using json = nlohmann::json;
+int numDisparities = 8;
+int blockSize = 5;
+int preFilterType = 1;
+int preFilterSize = 1;
+int preFilterCap = 31;
+int minDisparity = 0;
+int textureThreshold = 10;
+int uniquenessRatio = 15;
+int speckleRange = 0;
+int speckleWindowSize = 0;
+int disp12MaxDiff = -1;
+int dispType = CV_16S;
+
+// Creating an object of StereoSGBM algorithm
+cv::Ptr<cv::StereoBM> stereo = cv::StereoBM::create();
+
+cv::Mat imgL;
+cv::Mat imgR;
+cv::Mat imgL_gray;
+cv::Mat imgR_gray;
+
+// Defining callback functions for the trackbars to update parameter values
+
+static void on_trackbar1(int, void *)
+{
+  stereo->setNumDisparities(numDisparities*16);
+  numDisparities = numDisparities*16;
+}
+
+static void on_trackbar2(int, void *)
+{
+  stereo->setBlockSize(blockSize*2+5);
+  blockSize = blockSize*2+5;
+}
+
+static void on_trackbar3(int, void *)
+{
+  stereo->setPreFilterType(preFilterType);
+}
+
+static void on_trackbar4(int, void *)
+{
+  stereo->setPreFilterSize(preFilterSize*2+5);
+  preFilterSize = preFilterSize*2+5;
+}
+
+static void on_trackbar5(int, void *)
+{
+  stereo->setPreFilterCap(preFilterCap);
+}
+
+static void on_trackbar6(int, void *)
+{
+  stereo->setTextureThreshold(textureThreshold);
+}
+
+static void on_trackbar7(int, void *)
+{
+  stereo->setUniquenessRatio(uniquenessRatio);
+}
+
+static void on_trackbar8(int, void *)
+{
+  stereo->setSpeckleRange(speckleRange);
+}
+
+static void on_trackbar9(int, void *)
+{
+  stereo->setSpeckleWindowSize(speckleWindowSize*2);
+  speckleWindowSize = speckleWindowSize*2;
+}
+
+static void on_trackbar10(int, void *)
+{
+  stereo->setDisp12MaxDiff(disp12MaxDiff);
+}
+
+static void on_trackbar11(int, void *)
+{
+  stereo->setMinDisparity(minDisparity);
+}
 
 enum ROBOT_STATE
 {
@@ -408,6 +490,72 @@ bool detectCylinderWithAI(const vpImage<unsigned char> &I,
     std::cerr << "[AI] " << result;
   return false;
 }
+
+bool loadExtrinsicParameters(
+    const std::string &filename,
+    vpHomogeneousMatrix &M)
+{
+  std::ifstream file(filename);
+
+  if (!file.is_open()) {
+    std::cerr << "Cannot open file: "
+      << filename << std::endl;
+    return false;
+  }
+
+  std::string line;
+
+  vpRotationMatrix R;
+  vpTranslationVector T;
+
+  // =========================
+  // Read rotation matrix
+  // =========================
+
+  while (std::getline(file, line)) {
+    if (line.find("R:") != std::string::npos) {
+      for (int i = 0; i < 3; i++) {
+        std::getline(file, line);
+
+        std::stringstream ss(line);
+
+        ss >> R[i][0]
+          >> R[i][1]
+          >> R[i][2];
+      }
+
+      break;
+    }
+  }
+
+  // =========================
+  // Read translation vector
+  // =========================
+
+  while (std::getline(file, line)) {
+    if (line.find("T:") != std::string::npos) {
+      for (int i = 0; i < 3; i++) {
+        std::getline(file, line);
+
+        std::stringstream ss(line);
+
+        ss >> T[i];
+      }
+
+      break;
+    }
+  }
+
+  file.close();
+
+  // =========================
+  // Create homogeneous matrix
+  // =========================
+
+  M.buildFrom(T, R);
+
+  return true;
+}
 int main(int argc, char **argv)
 {
   // ========================
@@ -468,10 +616,11 @@ int main(int argc, char **argv)
   cv::Mat frame;
   int i = 0;
 
+  vpHomogeneousMatrix cRightMcLeft;
   vpCameraParameters cam_left, cam_right;
   std::string camera_left_folder = opt_camera_folder + "camera0_intrinsics.dat";
   std::string camera_right_folder = opt_camera_folder + "camera1_intrinsics.dat";
-
+  std::string camera_extrinsic_folder = opt_camera_folder + "camera1_rot_trans.dat";
   if (!loadCameraParameters(
     camera_left_folder,
     cam_left)) {
@@ -485,20 +634,72 @@ int main(int argc, char **argv)
   }
   cam_left.printParameters();
   cam_right.printParameters();
-// ========================
-// Load extrinsic eMc
-// ========================
+
+  loadExtrinsicParameters(camera_extrinsic_folder, cRightMcLeft);
+
+
+  cv::Mat K_left = (cv::Mat_<double>(3, 3) << cam_left.get_px(), 0, cam_left.get_u0(),
+                                              0, cam_left.get_py(), cam_left.get_v0(),
+                                              0, 0, 1);
+  cv::Mat D_left = (cv::Mat_<double>(4, 1) << cam_left.get_kud(), 0, 0, 0);
+
+  cv::Mat K_right = (cv::Mat_<double>(3, 3) << cam_right.get_px(), 0, cam_right.get_u0(),
+                                               0, cam_right.get_py(), cam_right.get_v0(),
+                                               0, 0, 1);
+  cv::Mat D_right = (cv::Mat_<double>(4, 1) << cam_right.get_kud(), 0, 0, 0);
+
+
+  vpRotationMatrix R_visp;
+  vpTranslationVector T_visp;
+
+  cRightMcLeft.extract(R_visp);
+  cRightMcLeft.extract(T_visp);
+
+  // --- CHUYỂN ĐỔI SANG OPENCV MAT ---
+
+  // 1. Chuyển đổi Ma trận xoay (3x3)
+  cv::Mat R_mat = cv::Mat::eye(3, 3, CV_64F);
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3; j++) {
+      R_mat.at<double>(i, j) = R_visp[i][j];
+    }
+  }
+
+  // 2. Chuyển đổi Vector tịnh tiến (3x1)
+  cv::Mat T_mat = cv::Mat::zeros(3, 1, CV_64F);
+  for (int i = 0; i < 3; i++) {
+    T_mat.at<double>(i, 0) = T_visp[i];
+  }
+
+  cv::Size imgSize(640, 480);
+  cv::Mat R1, R2, P1, P2, Q;
+  cv::Rect validPixROI1, validPixROI2;
+
+  cv::stereoRectify(K_left, D_left,
+                    K_right, D_right,
+                    imgSize, R_mat, T_mat,
+                    R1, R2, P1, P2, Q,
+                    cv::CALIB_ZERO_DISPARITY,
+                    0,
+                    imgSize,
+                    &validPixROI1, &validPixROI2);
+   // Initialize variables to store the maps for stereo rectification
+  cv::Mat Left_Stereo_Map1, Left_Stereo_Map2;
+  cv::Mat Right_Stereo_Map1, Right_Stereo_Map2;
+
   vpPoseVector e_P_c;
   if (!opt_eMc_filename.empty()) {
     e_P_c.loadYAML(opt_eMc_filename, e_P_c);
   }
   else {
+    return EXIT_FAILURE;
   }
   vpHomogeneousMatrix e_M_c(e_P_c);
 
   // ========================
   // Display
   // ========================
+  vpImage<unsigned char> I;
   vpImage<unsigned char> I_left;
   vpImage<unsigned char> I_right;
 
@@ -515,29 +716,13 @@ int main(int argc, char **argv)
 
   cap.read(frame);
   cv::flip(frame, frame, -1);
- // Split stereo image
-  int single_width = frame.cols / 2;
-  int height = frame.rows;
+  vpImageConvert::convert(frame, I);
 
-  cv::Mat frame_left =
-    frame(cv::Rect(0, 0, single_width, height));
+  display_left = vpDisplayFactory::createDisplay(I, 10, 10, "Current image");
 
-  cv::Mat frame_right =
-    frame(cv::Rect(single_width, 0,
-                   single_width, height));
+  vpDisplay::display(I);
 
-// Convert to grayscale ViSP images
-  vpImageConvert::convert(frame_left, I_left);
-  vpImageConvert::convert(frame_right, I_right);
-
-  display_left = vpDisplayFactory::createDisplay(I_left, 10, 10, "Current image");
-  display_right = vpDisplayFactory::createDisplay(I_right, 10, 10, "Current image");
-
-  vpDisplay::display(I_left);
-  vpDisplay::display(I_right);
-
-  vpDisplay::flush(I_left);
-  vpDisplay::flush(I_right);
+  vpDisplay::flush(I);
 
  // ========================
  // Khởi tạo robot Denso
@@ -561,7 +746,7 @@ int main(int argc, char **argv)
   vpVelocityTwistMatrix cVe;
   vpMatrix eJe;
   vpDot2 dot;
-  vpImagePoint cog;
+  vpImagePoint cog_left, cog_right;
   // ========================
   // Biến điều khiển
   // ========================
@@ -574,255 +759,313 @@ int main(int argc, char **argv)
   bool flushedGripper = false;
   bool init_feature = false;
   vpChrono chrono, chrene;
+  bool left_clicked = false;
+  bool right_clicked = false;
   for (;;) {
     cap.read(frame);
     cv::flip(frame, frame, -1);
-    frame_left = frame(cv::Rect(0, 0, single_width, height));
-    frame_right = frame(cv::Rect(single_width, 0, single_width, height));
+    vpImageConvert::convert(frame, I);
+    vpDisplay::display(I);
+    if (!left_clicked) {
+      if (vpDisplay::getClick(I,
+                              cog_left,
+                              false)) {
+        left_clicked = true;
 
-    vpImageConvert::convert(frame_left, I_left);
-    vpImageConvert::convert(frame_right, I_right);
+        vpDisplay::displayCross(
+            I_left,
+            cog_left,
+            15,
+            vpColor::red,
+            2
+        );
 
-    vpDisplay::display(I_left);
-    vpDisplay::display(I_right);
-    if (state == PREINIT) {
-      q_new[0] = 0;
-      q_new[1] = 0;
-      q_new[2] = 90;
-      q_new[3] = 0;
-      q_new[4] = 90;
-      q_new[5] = 0;
-
-      robot.sendPosition(q_new.data);
-      task.setServo(vpServo::EYEINHAND_L_cVe_eJe);
-      task.setInteractionMatrixType(vpServo::DESIRED, vpServo::PSEUDO_INVERSE);
-
-      vpTRACE("Set the position of the end-effector frame in the camera frame");
-
-      robot.get_cVe(cVe);
-      task.set_cVe(cVe);
-      vpTRACE("Set the Jacobian (expressed in the end-effector frame)");
-
-      robot.get_eJe(eJe);
-      task.set_eJe(eJe);
-
-      vpTRACE("\t set the gain");
-      task.setLambda(0.4);
-
-      vpTRACE("Display task information ");
-      task.print();
-
-      robot.setRobotState(vpRobot::STATE_POSITION_CONTROL);
-      state = INIT;
-    }
-    else if (state == INIT) {
-      if (!gripper_init) {
-        gripper_init = gripperOpen(gripper);
-        if (gripper_init) {
-          gripperStatus = OPENED;
-        }
-      }
-      if (!pose_init) {
-        robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-        q_cur.rad2deg();
-        bool reached =
-          std::abs(q_cur[0] - q_new[0])   < 0.01 &&
-          std::abs(q_cur[1] - q_new[1])   < 0.01 &&
-          std::abs(q_cur[2] - q_new[2])  < 0.01 &&
-          std::abs(q_cur[3] - q_new[3])   < 0.01 &&
-          std::abs(q_cur[4] - q_new[4])  < 0.01 &&
-          std::abs(q_cur[5] - q_new[5])   < 0.01;
-        if (reached) {
-          try {
-            // INIT: no hint — pick highest-confidence cylinder
-            vpImagePoint ai_hint;
-            if (detectCylinderWithAI(I, ai_hint)) {
-              std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
-              dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
-            }
-            else {
-              std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
-              dot.initTracking(I);           // original manual-click fallback
-            }
-            cog = dot.getCog();
-
-            vpDisplay::displayCross(I, cog, 10, vpColor::blue);
-            vpDisplay::flush(I);
-
-            vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
-
-            p.set_Z(1);
-
-            if (!init_feature) {
-              task.addFeature(p, pd);
-              init_feature = true;
-            }
-            task.print();
-
-            pose_init = true;
-
-          }
-          catch (const vpTrackingException &e) {
-          }
-        }
-      }
-      if (pose_init && gripper_init) {
-        chrono.start(true);
-        chrene.start(true);
-        state = JOINT;
-        q_cur = q_new.deg2rad();
+        std::cout << "Left click: "
+          << cog_left.get_u()
+          << ", "
+          << cog_left.get_v()
+          << std::endl;
       }
     }
-    else if (state == JOINT) {
-      robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-      bool reached =
-        std::abs(q_cur[0] - q_new[0])   < 0.01 &&
-        std::abs(q_cur[1] - q_new[1])   < 0.01 &&
-        std::abs(q_cur[2] - q_new[2])  < 0.01 &&
-        std::abs(q_cur[3] - q_new[3])   < 0.01 &&
-        std::abs(q_cur[4] - q_new[4])  < 0.01 &&
-        std::abs(q_cur[5] - q_new[5])   < 0.01;
+    if (!right_clicked) {
+      if (vpDisplay::getClick(I,
+                              cog_right,
+                              false)) {
+        right_clicked = true;
 
-      if (reached) {
-        try {
-          // JOINT: pass &ai_hint so Python picks the cylinder closest to
-          // the last known position, not the highest-confidence one.
-          // This prevents the servo from jumping to a different cylinder
-          // when scores fluctuate as the robot moves.
-          // vpImagePoint ai_hint;
-          // if (detectCylinderWithAI(I, ai_hint)) {
-          //   std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
-          //   dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
-          // }
-          // else {
-          //   std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
-          //   dot.initTracking(I);           // original manual-click fallback
-          // }
-          // cog = dot.getCog();
-          dot.track(I);
-          cog = dot.getCog();
-        }
-        catch (const vpTrackingException &e) {
-          // sendClassified = false;
-          // pose_init = false;
-          // gripper_init = false;
-          // task.kill();
-          // state = PREINIT;
-          // continue;
-          vpImagePoint ai_hint;
-          if (detectCylinderWithAI(I, ai_hint)) {
-            std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
-            dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
-          }
-          else {
-            std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
-            dot.initTracking(I);           // original manual-click fallback
-            continue;
-          }
-          cog = dot.getCog();
+        vpDisplay::displayCross(
+            I_right,
+            cog_right,
+            15,
+            vpColor::red,
+            2
+        );
 
-          vpDisplay::displayCross(I, cog, 10, vpColor::blue);
-          vpDisplay::flush(I);
-
-          vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
-        }
-        // Display a green cross at the center of gravity position in the image
-        // vpDisplay::displayCross(I, ai_hint, 10, vpColor::green);
-        // vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
-        vpDisplay::displayCross(I, cog, 10, vpColor::green);
-
-        vpFeatureBuilder::create(p, cam, dot);
-        robot.get_eJe(eJe);
-        task.set_eJe(eJe);
-
-
-        vpColVector v;
-        vpColVector vel_max(6);
-        double delta_t = 0.5; // 10 ms
-        v = task.computeControlLaw();
-
-        vpServoDisplay::display(task, cam, I);
-      // if (getMaxRotationVelocity() == getMaxRotationVelocityJoint6()) {
-        if (std::fabs(robot.getMaxRotationVelocity() - robot.getMaxRotationVelocityJoint6()) < std::numeric_limits<double>::epsilon()) {
-          for (unsigned int i = 0; i < 6; i++)
-            vel_max[i] = robot.getMaxRotationVelocity();
-        }
-        else {
-          for (unsigned int i = 0; i < 5; i++)
-            vel_max[i] = robot.getMaxRotationVelocity();
-          vel_max[5] = robot.getMaxRotationVelocityJoint6();
-        }
-        v = vpRobot::saturateVelocities(v, vel_max, true);
-        robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-        q_new = q_cur + v * delta_t;
-        robot.setPosition(vpRobot::ARTICULAR_FRAME, q_new);
-
-        if (abs(task.getError()[0]) < 5e-3 && abs(task.getError()[1]) < 5e-3) {
-          chrene.stop();
-          std::cout << " TIME CONVERGED:" << chrene.getDurationMs() << std::endl;
-          task.print();
-          robot.uartSend(converged, 4);
-          state = APPROACH;
-        }
-        task.print();
-      }
-      vpDisplay::flush(I);
-    }
-    else if (state == APPROACH) {
-      robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-      q_cur.rad2deg();
-      if (q_cur.data[0] == -1 && q_cur.data[1] == -1 && q_cur.data[2] == -1 && q_cur.data[3] == -1 && q_cur.data[4] == -1 && q_cur.data[5] == -1) {
-        state = GRIPPER;
+        std::cout << "Right click: "
+          << cog_right.get_u()
+          << ", "
+          << cog_right.get_v()
+          << std::endl;
       }
     }
-    else if (state == GRIPPER) {
-      if (gripperClose(gripper)) {
-        state = CLASSIFIED;
-      }
-    }
-    else if (state == CLASSIFIED) {
-      // gripperClose(gripper);
-      // SEND oke to RC5 controller
-      //
-      // robot.uartSend(converged, 4);
-      if (!sendClassified) {
-        q_new[0] = 53.35;
-        q_new[1] = 25.15;
-        q_new[2] = 91.58;
-        q_new[3] = 0;
-        q_new[4] = 63.27;
-        q_new[5] = 53.35;
+    if (left_clicked && right_clicked) {
+      double uL = cog_left.get_u();
+      double uR = cog_right.get_u();
 
-        robot.sendPosition(q_new.data);
-        sendClassified = true;
-      }
-      // gripperClose(gripper);
-      robot.flush();
-      robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
-      q_cur.rad2deg();
-      bool reached =
-        std::abs(q_cur[0] - q_new[0])   < 0.01 &&
-        std::abs(q_cur[1] - q_new[1])   < 0.01 &&
-        std::abs(q_cur[2] - q_new[2])  < 0.01 &&
-        std::abs(q_cur[3] - q_new[3])   < 0.01 &&
-        std::abs(q_cur[4] - q_new[4])  < 0.01 &&
-        std::abs(q_cur[5] - q_new[5])   < 0.01;
+      double disparity = uL - uR;
 
-      if (reached) {
-        gripperFlush(gripper);
-        gripperOpen(gripper);
-        vpTime::wait(500);
-        sendClassified = false;
-        pose_init = false;
-        gripper_init = false;
-        std::cout << "###########################################################################" <<std::endl;
-        chrono.stop();
-        std::cout << "COMPLETE ONE " << chrono.getDurationMs() << std::endl;
-        state = PREINIT;
+      if (fabs(disparity) > 0.1) {
+        double fx = cam_left.get_px();
+
+        double Z =
+          (fx * cRightMcLeft[0][3]) / disparity;
+
+        std::cout << "Depth Z = "
+          << Z
+          << " meters"
+          << std::endl;
       }
+
+      left_clicked = false;
+      right_clicked = false;
     }
-    vpDisplay::flush(I_left);
-    vpDisplay::flush(I_right);
+    // if (state == PREINIT) {
+    //   q_new[0] = 0;
+    //   q_new[1] = 0;
+    //   q_new[2] = 90;
+    //   q_new[3] = 0;
+    //   q_new[4] = 90;
+    //   q_new[5] = 0;
+
+    //   robot.sendPosition(q_new.data);
+    //   task.setServo(vpServo::EYEINHAND_L_cVe_eJe);
+    //   task.setInteractionMatrixType(vpServo::DESIRED, vpServo::PSEUDO_INVERSE);
+
+    //   vpTRACE("Set the position of the end-effector frame in the camera frame");
+
+    //   robot.get_cVe(cVe);
+    //   task.set_cVe(cVe);
+    //   vpTRACE("Set the Jacobian (expressed in the end-effector frame)");
+
+    //   robot.get_eJe(eJe);
+    //   task.set_eJe(eJe);
+
+    //   vpTRACE("\t set the gain");
+    //   task.setLambda(0.4);
+
+    //   vpTRACE("Display task information ");
+    //   task.print();
+
+    //   robot.setRobotState(vpRobot::STATE_POSITION_CONTROL);
+    //   state = INIT;
+    // }
+    // else if (state == INIT) {
+    //   if (!gripper_init) {
+    //     gripper_init = gripperOpen(gripper);
+    //     if (gripper_init) {
+    //       gripperStatus = OPENED;
+    //     }
+    //   }
+    //   if (!pose_init) {
+    //     robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+    //     q_cur.rad2deg();
+    //     bool reached =
+    //       std::abs(q_cur[0] - q_new[0])   < 0.01 &&
+    //       std::abs(q_cur[1] - q_new[1])   < 0.01 &&
+    //       std::abs(q_cur[2] - q_new[2])  < 0.01 &&
+    //       std::abs(q_cur[3] - q_new[3])   < 0.01 &&
+    //       std::abs(q_cur[4] - q_new[4])  < 0.01 &&
+    //       std::abs(q_cur[5] - q_new[5])   < 0.01;
+    //     if (reached) {
+    //       try {
+    //         // INIT: no hint — pick highest-confidence cylinder
+    //         vpImagePoint ai_hint;
+    //         if (detectCylinderWithAI(I, ai_hint)) {
+    //           std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+    //           dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
+    //         }
+    //         else {
+    //           std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+    //           dot.initTracking(I);           // original manual-click fallback
+    //         }
+    //         cog = dot.getCog();
+
+    //         vpDisplay::displayCross(I, cog, 10, vpColor::blue);
+    //         vpDisplay::flush(I);
+
+    //         vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
+
+    //         p.set_Z(1);
+
+    //         if (!init_feature) {
+    //           task.addFeature(p, pd);
+    //           init_feature = true;
+    //         }
+    //         task.print();
+
+    //         pose_init = true;
+
+    //       }
+    //       catch (const vpTrackingException &e) {
+    //       }
+    //     }
+    //   }
+    //   if (pose_init && gripper_init) {
+    //     chrono.start(true);
+    //     chrene.start(true);
+    //     state = JOINT;
+    //     q_cur = q_new.deg2rad();
+    //   }
+    // }
+    // else if (state == JOINT) {
+    //   robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+    //   bool reached =
+    //     std::abs(q_cur[0] - q_new[0])   < 0.01 &&
+    //     std::abs(q_cur[1] - q_new[1])   < 0.01 &&
+    //     std::abs(q_cur[2] - q_new[2])  < 0.01 &&
+    //     std::abs(q_cur[3] - q_new[3])   < 0.01 &&
+    //     std::abs(q_cur[4] - q_new[4])  < 0.01 &&
+    //     std::abs(q_cur[5] - q_new[5])   < 0.01;
+
+    //   if (reached) {
+    //     try {
+    //       // JOINT: pass &ai_hint so Python picks the cylinder closest to
+    //       // the last known position, not the highest-confidence one.
+    //       // This prevents the servo from jumping to a different cylinder
+    //       // when scores fluctuate as the robot moves.
+    //       // vpImagePoint ai_hint;
+    //       // if (detectCylinderWithAI(I, ai_hint)) {
+    //       //   std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+    //       //   dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
+    //       // }
+    //       // else {
+    //       //   std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+    //       //   dot.initTracking(I);           // original manual-click fallback
+    //       // }
+    //       // cog = dot.getCog();
+    //       dot.track(I);
+    //       cog = dot.getCog();
+    //     }
+    //     catch (const vpTrackingException &e) {
+    //       // sendClassified = false;
+    //       // pose_init = false;
+    //       // gripper_init = false;
+    //       // task.kill();
+    //       // state = PREINIT;
+    //       // continue;
+    //       vpImagePoint ai_hint;
+    //       if (detectCylinderWithAI(I, ai_hint)) {
+    //         std::cout << "[AI] Cylinder detected at: " << ai_hint << std::endl;
+    //         dot.initTracking(I, ai_hint);  // automatic init at AI-detected centre
+    //       }
+    //       else {
+    //         std::cout << "[AI] Detection failed. Falling back to manual click." << std::endl;
+    //         dot.initTracking(I);           // original manual-click fallback
+    //         continue;
+    //       }
+    //       cog = dot.getCog();
+
+    //       vpDisplay::displayCross(I, cog, 10, vpColor::blue);
+    //       vpDisplay::flush(I);
+
+    //       vpFeatureBuilder::create(p, cam, dot); // retrieve x,y and Z of the vpPoint structure
+    //     }
+    //     // Display a green cross at the center of gravity position in the image
+    //     // vpDisplay::displayCross(I, ai_hint, 10, vpColor::green);
+    //     // vpFeatureBuilder::create(p, cam, ai_hint); // retrieve x,y and Z of the vpPoint structure
+    //     vpDisplay::displayCross(I, cog, 10, vpColor::green);
+
+    //     vpFeatureBuilder::create(p, cam, dot);
+    //     robot.get_eJe(eJe);
+    //     task.set_eJe(eJe);
+
+
+    //     vpColVector v;
+    //     vpColVector vel_max(6);
+    //     double delta_t = 0.5; // 10 ms
+    //     v = task.computeControlLaw();
+
+    //     vpServoDisplay::display(task, cam, I);
+    //   // if (getMaxRotationVelocity() == getMaxRotationVelocityJoint6()) {
+    //     if (std::fabs(robot.getMaxRotationVelocity() - robot.getMaxRotationVelocityJoint6()) < std::numeric_limits<double>::epsilon()) {
+    //       for (unsigned int i = 0; i < 6; i++)
+    //         vel_max[i] = robot.getMaxRotationVelocity();
+    //     }
+    //     else {
+    //       for (unsigned int i = 0; i < 5; i++)
+    //         vel_max[i] = robot.getMaxRotationVelocity();
+    //       vel_max[5] = robot.getMaxRotationVelocityJoint6();
+    //     }
+    //     v = vpRobot::saturateVelocities(v, vel_max, true);
+    //     robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+    //     q_new = q_cur + v * delta_t;
+    //     robot.setPosition(vpRobot::ARTICULAR_FRAME, q_new);
+
+    //     if (abs(task.getError()[0]) < 5e-3 && abs(task.getError()[1]) < 5e-3) {
+    //       chrene.stop();
+    //       std::cout << " TIME CONVERGED:" << chrene.getDurationMs() << std::endl;
+    //       task.print();
+    //       robot.uartSend(converged, 4);
+    //       state = APPROACH;
+    //     }
+    //     task.print();
+    //   }
+    //   vpDisplay::flush(I);
+    // }
+    // else if (state == APPROACH) {
+    //   robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+    //   q_cur.rad2deg();
+    //   if (q_cur.data[0] == -1 && q_cur.data[1] == -1 && q_cur.data[2] == -1 && q_cur.data[3] == -1 && q_cur.data[4] == -1 && q_cur.data[5] == -1) {
+    //     state = GRIPPER;
+    //   }
+    // }
+    // else if (state == GRIPPER) {
+    //   if (gripperClose(gripper)) {
+    //     state = CLASSIFIED;
+    //   }
+    // }
+    // else if (state == CLASSIFIED) {
+    //   // gripperClose(gripper);
+    //   // SEND oke to RC5 controller
+    //   //
+    //   // robot.uartSend(converged, 4);
+    //   if (!sendClassified) {
+    //     q_new[0] = 53.35;
+    //     q_new[1] = 25.15;
+    //     q_new[2] = 91.58;
+    //     q_new[3] = 0;
+    //     q_new[4] = 63.27;
+    //     q_new[5] = 53.35;
+
+    //     robot.sendPosition(q_new.data);
+    //     sendClassified = true;
+    //   }
+    //   // gripperClose(gripper);
+    //   robot.flush();
+    //   robot.getPosition(vpRobot::ARTICULAR_FRAME, q_cur);
+    //   q_cur.rad2deg();
+    //   bool reached =
+    //     std::abs(q_cur[0] - q_new[0])   < 0.01 &&
+    //     std::abs(q_cur[1] - q_new[1])   < 0.01 &&
+    //     std::abs(q_cur[2] - q_new[2])  < 0.01 &&
+    //     std::abs(q_cur[3] - q_new[3])   < 0.01 &&
+    //     std::abs(q_cur[4] - q_new[4])  < 0.01 &&
+    //     std::abs(q_cur[5] - q_new[5])   < 0.01;
+
+    //   if (reached) {
+    //     gripperFlush(gripper);
+    //     gripperOpen(gripper);
+    //     vpTime::wait(500);
+    //     sendClassified = false;
+    //     pose_init = false;
+    //     gripper_init = false;
+    //     std::cout << "###########################################################################" <<std::endl;
+    //     chrono.stop();
+    //     std::cout << "COMPLETE ONE " << chrono.getDurationMs() << std::endl;
+    //     state = PREINIT;
+    //   }
+    // }
+    vpDisplay::flush(I);
   }
   return EXIT_SUCCESS;
 }
