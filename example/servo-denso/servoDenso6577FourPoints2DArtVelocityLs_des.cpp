@@ -120,7 +120,6 @@ bool gripperSendCommand(serialib *gripper, std::string command)
   );
 
 }
-
 bool gripperReceiveBuffer(serialib *gripper, char *buffer)
 {
   int idx = 0;
@@ -167,7 +166,6 @@ bool gripperReceiveBuffer(serialib *gripper, char *buffer)
   }
   return false;
 }
-
 bool gripperStatusRequest(serialib *gripper)
 {
   json object = { {"T", 105} };
@@ -175,7 +173,6 @@ bool gripperStatusRequest(serialib *gripper)
 
   return gripperSendCommand(gripper, command);
 }
-
 bool gripperOpen(serialib *gripper)
 {
   char buffer[256];
@@ -210,7 +207,6 @@ bool gripperOpen(serialib *gripper)
   }
   return false;
 }
-
 bool gripperClose(serialib *gripper)
 {
   char buffer[256];
@@ -446,28 +442,35 @@ int main(int argc, char **argv)
       return EXIT_FAILURE;
     }
   }
-  // ========================
-  // Khởi tạo gripper (UART)
-  // ========================
+  // Init Gripper
   serialib *gripper = new serialib;
   gripper->openDevice("/dev/ttyACM0", 115200);
 
-  // ========================
-  // Khởi tạo camera
-  // ========================
+  // Init Camera
   cv::VideoCapture cap(opt_device, cv::CAP_V4L2); // open the default camera
   if (!cap.isOpened()) {            // check if we succeeded
     std::cout << "Failed to open the camera" << std::endl;
     return EXIT_FAILURE;
   }
+  // Use MJPEG
+  cap.set(
+      cv::CAP_PROP_FOURCC,
+      cv::VideoWriter::fourcc('M', 'J', 'P', 'G')
+  );
+
+  // Resolution
+  cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+  cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+
+  // FPS
+  cap.set(cv::CAP_PROP_FPS, 30);
+
   cv::Mat frame;
   int i = 0;
-  // ========================
-  // Load intrinsic camera
-  // ========================
+
   vpCameraParameters cam_left, cam_right;
-  std::string camera_left_folder = opt_camera_folder + "/camera_left.dat";
-  std::string camera_right_folder = opt_camera_folder + "/camera_right.dat";
+  std::string camera_left_folder = opt_camera_folder + "camera0_intrinsics.dat";
+  std::string camera_right_folder = opt_camera_folder + "camera1_intrinsics.dat";
 
   if (!loadCameraParameters(
     camera_left_folder,
@@ -480,7 +483,8 @@ int main(int argc, char **argv)
     cam_right)) {
     return EXIT_FAILURE;
   }
-
+  cam_left.printParameters();
+  cam_right.printParameters();
 // ========================
 // Load extrinsic eMc
 // ========================
@@ -495,7 +499,6 @@ int main(int argc, char **argv)
   // ========================
   // Display
   // ========================
-  vpImage<unsigned char> I;
   vpImage<unsigned char> I_left;
   vpImage<unsigned char> I_right;
 
@@ -510,8 +513,22 @@ int main(int argc, char **argv)
   while ((i++ < 60) && !cap.read(frame)) {
   } // warm up camera by skiping unread frames
 
-  cap >> frame;
-  vpImageConvert::convert(frame, I);
+  cap.read(frame);
+  cv::flip(frame, frame, -1);
+ // Split stereo image
+  int single_width = frame.cols / 2;
+  int height = frame.rows;
+
+  cv::Mat frame_left =
+    frame(cv::Rect(0, 0, single_width, height));
+
+  cv::Mat frame_right =
+    frame(cv::Rect(single_width, 0,
+                   single_width, height));
+
+// Convert to grayscale ViSP images
+  vpImageConvert::convert(frame_left, I_left);
+  vpImageConvert::convert(frame_right, I_right);
 
   display_left = vpDisplayFactory::createDisplay(I_left, 10, 10, "Current image");
   display_right = vpDisplayFactory::createDisplay(I_right, 10, 10, "Current image");
@@ -558,10 +575,16 @@ int main(int argc, char **argv)
   bool init_feature = false;
   vpChrono chrono, chrene;
   for (;;) {
-    cap >> frame;
-    vpImageConvert::convert(frame, I);
-    vpDisplay::display(I);
+    cap.read(frame);
+    cv::flip(frame, frame, -1);
+    frame_left = frame(cv::Rect(0, 0, single_width, height));
+    frame_right = frame(cv::Rect(single_width, 0, single_width, height));
 
+    vpImageConvert::convert(frame_left, I_left);
+    vpImageConvert::convert(frame_right, I_right);
+
+    vpDisplay::display(I_left);
+    vpDisplay::display(I_right);
     if (state == PREINIT) {
       q_new[0] = 0;
       q_new[1] = 0;
@@ -798,7 +821,8 @@ int main(int argc, char **argv)
         state = PREINIT;
       }
     }
-    vpDisplay::flush(I);
+    vpDisplay::flush(I_left);
+    vpDisplay::flush(I_right);
   }
   return EXIT_SUCCESS;
 }
