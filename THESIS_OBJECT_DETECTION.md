@@ -169,7 +169,7 @@ example/servo-denso/ai_module/
 | Input size | 320 × 320 px |
 | Input dtype | uint8 |
 | Quantization | INT8 (post-training quantization) |
-| Object class | `cylinder` (single class) |
+| Object classes | `cylinder` (class 0), `cube` (class 1) — 2-class model |
 | EdgeTPU model | `cylinder_detector_int8_edgetpu.tflite` (compiled with `edgetpu_compiler`) |
 | CPU model | `cylinder_detector_int8.tflite` (standard TFLite, no custom ops) |
 
@@ -183,17 +183,18 @@ example/servo-denso/ai_module/
 | F1 | ~0.99 |
 
 ### Confidence Score Analysis
-Tested on 218 cylinder images and 10 non-cylinder (cube) images:
+Tested on 218 cylinder images and images containing cubes:
 
 | Category | Score range | Notes |
 |---|---|---|
-| True positives (cylinders) | 0.29 – 0.98, **median 0.94** | 99.1% score above 0.70 |
-| False positives (non-cylinders) | 0.08 – 0.36 | **None exceed 0.50** |
+| True positives (cylinders, class 0) | 0.29 – 0.98, **median 0.94** | 99.1% score above 0.70 |
+| Cube detections (class 1) | — | Filtered out by class ID before threshold check |
 
-Gap between false positives (max 0.36) and true positives (99.1% above 0.70) is 0.34 —
-strong class separation confirming the model has learned discriminative cylinder features.
+The model is trained on both classes. The inference script filters all results to
+**class 0 (cylinder) only** — cube detections are discarded before the confidence
+threshold is applied. This eliminates false positives from the cube class entirely.
 
-Current threshold: **0.50** (safely above all observed false positives).
+Current threshold: **0.50**.
 
 ---
 
@@ -257,23 +258,24 @@ python3 detect_cylinder.py <image_path> [--hint U V]
 ```
 Read image (cv2.imread)
     ↓
-Load model (pycoral → tflite_runtime → ai_edge_litert → tensorflow)
+Load model (pycoral → ai_edge_litert → tflite_runtime → tensorflow)
     ↓
 Preprocess: resize to 320×320, BGR→RGB, keep uint8
     ↓
 interpreter.invoke()
     ↓
 Identify output tensors by shape:
-  boxes:  shape [1, N, 4]  (normalized [ymin, xmin, ymax, xmax])
-  scores: shape [1, N]     (lowest name suffix :1, to avoid class IDs :2)
+  boxes:   shape [1, N, 4]  (normalized [ymin, xmin, ymax, xmax])
+  scores:  shape [1, N]     (lowest name suffix :1)
+  classes: shape [1, N]     (second-lowest suffix :2)
     ↓
 Dequantize uint8: float = scale × (quantized − zero_point)
     ↓
 Convert boxes: normalized → pixel coordinates
     ↓
-Filter by confidence_threshold
+Filter: class_id == 0 (cylinder) AND score >= confidence_threshold
     ↓
-Select best detection (highest confidence)
+Select best cylinder (highest confidence among filtered)
     ↓
 Compute center: u = x1 + w/2,  v = y1 + h/2
     ↓
@@ -301,7 +303,8 @@ crashing with IndexError.
 
 **Solution**: identify tensors dynamically by shape:
 - Boxes: shape `[1, N, 4]`
-- Scores: shape `[1, N]` with the **lowest integer name suffix** (`:1` not `:2`)
+- Scores: shape `[1, N]` with the **lowest integer name suffix** (`:1`)
+- Classes: shape `[1, N]` with the **second-lowest suffix** (`:2`)
 
 ### Critical Implementation Detail: Two Separate Models
 
@@ -344,7 +347,7 @@ official replacement with identical API, published to PyPI and supporting Python
   "cpu_model_path":       "ai_module/models/cylinder_detector_int8.tflite",
   "confidence_threshold": 0.5,
   "image_size":           320,
-  "class_names":          ["cylinder"],
+  "class_names":          ["cylinder", "cube"],
   // "python_bin": "/home/nam/.pyenv/versions/3.9.17/envs/gesture_env/bin/python3"
   "python_bin":           "python3"
 }
@@ -410,6 +413,15 @@ one, causing the servo to target an unintended cylinder.
 parameter; when provided, Python selects the cylinder closest to the hint position
 rather than highest confidence (not yet fully deployed — blob tracker handles JOINT
 stability instead).
+
+### P8: 2-class model returns cube detections as cylinders
+**Problem**: The updated model detects both cylinders (class 0) and cubes (class 1).
+The original inference script ignored class IDs, so a high-confidence cube detection
+could be returned as the target cylinder.  
+**Solution**: `run_inference()` now extracts the classes tensor (`:2` name suffix,
+shape `[1,N]`), dequantizes it from uint8, and returns it alongside boxes and scores.
+`main()` filters candidates with `class_id == 0 AND score >= threshold` — cube
+detections are discarded before the best detection is selected.
 
 ---
 
@@ -480,10 +492,9 @@ the 0.50 threshold — no false positives observed.
 | Limitation | Description | Possible improvement |
 |---|---|---|
 | AI per-frame tracking unstable | Direct AI-based tracking every servo step oscillates due to inference latency (~100–200 ms/call) and confidence fluctuations | Use EdgeTPU for faster inference; add Kalman filter on detections |
-| Multi-cylinder scene | AI picks highest-confidence, which can switch between cylinders | Deploy `--hint` closest-to-last-position strategy (implemented but not activated) |
+| Multi-cylinder scene | AI picks highest-confidence cylinder, which can switch between multiple cylinders in frame | Deploy `--hint` closest-to-last-position strategy (implemented but not activated) |
 | Grayscale frame to AI | Camera frame is captured as grayscale `vpImage`; converted to 3-channel BGR before saving — model trained on color images | Capture color frame separately for AI, keep grayscale for servo |
 | Subprocess overhead | Each `popen()` call starts a new Python process (~200–500 ms on CPU, ~50 ms on EdgeTPU) | Persistent Python process with stdin/stdout protocol |
-| Single-class model | Model only detects `cylinder` — no other objects | Extend training data for multi-class pick-and-place |
 
 ---
 

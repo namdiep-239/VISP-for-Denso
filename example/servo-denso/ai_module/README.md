@@ -57,6 +57,10 @@ At runtime the script tries each backend in order and stops at the first that wo
 The `_edgetpu.tflite` model contains a custom op that **cannot** run on CPU.
 The script automatically selects the correct model based on hardware availability.
 
+Both models detect **two classes**: class 0 = `cylinder`, class 1 = `cube`.
+The script filters all detections to class 0 only before returning a result —
+cube detections are discarded regardless of confidence score.
+
 ## Configuration — config.json
 
 ```json
@@ -65,7 +69,7 @@ The script automatically selects the correct model based on hardware availabilit
   "cpu_model_path":       "ai_module/models/cylinder_detector_int8.tflite",
   "confidence_threshold": 0.5,
   "image_size":           320,
-  "class_names":          ["cylinder"],
+  "class_names":          ["cylinder", "cube"],
   "python_bin":           "python3"
 }
 ```
@@ -124,6 +128,9 @@ bool detectCylinderWithAI(const vpImage<unsigned char> &I,
 4. Wait up to **3 seconds** via `select()` for one line on stdout
 5. Parse `SUCCESS u v conf ...` → set `detected_center = vpImagePoint(v, u)`, return `true`
 6. Any `FAILURE` or timeout → return `false`, `detected_center` unchanged
+
+The Python script filters to **cylinder detections only** (class 0) before printing `SUCCESS`,
+so the C++ caller always receives a cylinder coordinate or a failure — never a cube.
 
 **INIT state** — called once, no hint:
 ```
