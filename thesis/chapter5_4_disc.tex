@@ -1,0 +1,93 @@
+%%=============================================================
+%% chapter5_4_disc.tex
+%% Phần 5.4 — Thảo luận và Hạn chế
+%%
+%% \input vào chapter5_4.tex.
+%%=============================================================
+
+% ----------------------------------------------------------------
+\subsection{Thảo luận và Hạn chế}
+\label{subsec:ai3-disc}
+% ----------------------------------------------------------------
+
+% ---- Thảo luận ----
+\subsubsection*{Thảo luận}
+
+Kết quả quan trọng nhất từ góc độ ứng dụng là \textbf{Precision =
+1.000 và FP = 0} được duy trì nhất quán qua mọi điều kiện đánh
+giá: COCO protocol (96 ảnh), confidence analysis (96 ảnh runtime),
+và benchmark ba biến thể model (76 ảnh, 128 instance). Tính chất
+này trực tiếp bảo đảm an toàn cho robot --- detector không bao
+giờ trả về vị trí của cube hay vùng nền làm điểm khởi đầu cho
+vpDot2. Biên an toàn confidence (min TP $-$ threshold $= 0.687
+- 0.50 = 0.187$) cho thấy ngưỡng 0.50 còn cách xa vùng nhập
+nhằng, không cần điều chỉnh với dữ liệu hiện tại.
+
+AP50 $= 1.000$ xác nhận tất cả cylinder được định vị đúng ở mức
+IoU $\geq 50\%$ --- đủ cho mục đích khởi tạo vpDot2, vốn chỉ cần
+tọa độ tâm nằm trong vùng lân cận của blob, không đòi hỏi
+bounding box pixel-perfect. Chênh lệch AP50 vs AP75 ($1.000$
+vs $0.969$) cho biết một số hộp còn lệch nhẹ ở mức độ chính xác
+cao hơn --- chấp nhận được vì vpDot2 tự tinh chỉnh ngay sau khi
+nhận tọa độ khởi đầu.
+
+Benchmark ba biến thể model xác nhận INT8 quantization không
+gây mất accuracy (TP/FP/FN giống hệt Float32) nhưng \textbf{không
+cải thiện tốc độ trên CPU} ($1231\,\text{ms}$ vs $1222\,\text{ms}$,
+chênh $0.7\%$). Lợi ích quantization chỉ thực sự có khi chạy
+trên phần cứng chuyên dụng: EdgeTPU đạt $24\,\text{ms}$, nhanh
+hơn $49.9\times$ so với CPU trong cùng điều kiện benchmark, trong
+khi giữ nguyên hoàn toàn accuracy. Đây là lý do chính để dùng
+Coral USB Accelerator trong deployment.
+
+% ---- Hạn chế ----
+\subsubsection*{Hạn chế}
+
+\paragraph{1.~Dataset nhỏ, môi trường kiểm soát.}
+Tập dữ liệu gồm 533 ảnh thu thập trong một phòng lab với camera
+cố định, ánh sáng ổn định, và hai loại đối tượng cụ thể
+(cylinder và cube màu trắng/xám trên nền tối). Mô hình chưa được
+đánh giá với ánh sáng thay đổi (bóng đổ mạnh, phản chiếu, đèn
+huỳnh quang chớp), vật thể bị che khuất một phần nhiều, hay
+cylinder ở kích thước khác. Hiệu năng trong các điều kiện này
+chưa được xác định.
+
+\paragraph{2.~Góc nhìn camera cố định (overhead).}
+Toàn bộ ảnh training được chụp từ góc overhead cố định, tương
+ứng với vị trí home pose của robot. Nếu camera bị dịch chuyển
+hoặc góc nhìn thay đổi đáng kể so với lúc thu thập dữ liệu,
+confidence score có thể giảm và FN tăng. Hiện chưa có đánh giá
+về robustness với góc nhìn biến thiên.
+
+\paragraph{3.~Overhead subprocess chưa được đo trong deployment.}
+Số liệu benchmark ($24\,\text{ms}$ EdgeTPU, $1222\,\text{ms}$
+CPU) đo thời gian thực thi TFLite model thuần túy. Trong deployment
+thực tế qua \texttt{popen()}, mỗi lần gọi \texttt{detectCylinderWithAI()}
+còn phát sinh thêm: khởi động Python interpreter, load model từ
+disk, và đọc/ghi JPEG. Chi phí này chưa được đo trực tiếp trên
+phần cứng robot đích và có thể chiếm phần đáng kể tổng latency
+mỗi lần gọi.
+
+\paragraph{4.~11 operators chạy trên CPU (không map được lên EdgeTPU).}
+Trong tổng số 275 ops, 11 ops cuối (DEQUANTIZE $\times 2$,
+\texttt{TFLite\_Detection\_PostProcess}, QUANTIZE $\times 8$)
+buộc chạy trên CPU. Đây là giới hạn kiến trúc của TFLite
+detection pipeline: NMS là custom op không được hỗ trợ trên
+EdgeTPU; DEQUANTIZE và QUANTIZE tại biên EdgeTPU/CPU là overhead
+không tránh được. Không thể loại bỏ các ops này với công cụ
+hiện tại (\texttt{edgetpu\_compiler} v16).
+
+\paragraph{5.~Chỉ hỗ trợ 2 lớp đối tượng.}
+Model được training để phân biệt duy nhất cylinder (class 0)
+và cube (class 1). Nếu môi trường sản xuất thêm loại vật thể
+mới, hệ thống cần thu thập dữ liệu mới, gán nhãn lại, và
+retraining từ đầu (transfer learning từ checkpoint hiện tại
+không đủ nếu lớp mới khác biệt lớn về hình dạng).
+
+\paragraph{6.~FN duy nhất xử lý bằng fallback thủ công.}
+Recall $= 0.990$ (FN $= 1$ trên 96 instance) phụ thuộc vào
+người vận hành can thiệp khi cylinder không được phát hiện.
+Trong mô hình unattended operation hoàn toàn, FN này sẽ
+chặn chu kỳ cho đến khi có input thủ công. Chưa có cơ chế
+retry tự động (ví dụ: chụp lại ảnh với exposure khác, hoặc
+di chuyển camera) để xử lý trường hợp này.
